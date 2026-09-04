@@ -1,0 +1,46 @@
+
+=== AETHER economy simulation: 4000 players x 120 days ===
+income_scale=1.0  ref_rate=0.05  exponent=1.0  onboard_pulls=500.0
+save_fraction=0.35  save_horizon_days=4.0
+base Rift costs: faint=500, stable=4,000, deep=8,000, singularity=14,000
+
+milestone                                  median     target               window   reached
+------------------------------------------------------------------------------------------------
+First Bright Fragment                     4.8 min    5.0 min   1.0 min - 20.0 min   100.0%  OK
+First Radiant                            45.0 min   45.0 min     20.0 min - 2.0 h   100.0%  OK
+First Singular                             41.0 h      2.5 d       36.0 h - 4.0 d   100.0%  OK
+Stable Rifts affordable regularly          17.0 h     24.0 h        4.8 h - 2.0 d   100.0%  OK
+Deep Rifts affordable regularly             5.9 d      5.0 d        3.0 d - 7.0 d   100.0%  OK
+First Singularity Rift                     16.7 d     17.5 d      12.0 d - 24.0 d   100.0%  OK
+All 50 collected                           47.8 d     70.0 d      52.0 d - 90.0 d    94.8%  off
+
+targets met: 6/7
+players with >=1 Singular by day 7 : 100.0%
+median Flux/sec at horizon         : 14,039.75
+median Fragments owned at horizon  : 50 / 50
+median total pulls at horizon      : 1,663
+mean pity activations              : 6.6
+mean Rifts opened                  : faint=531.8, stable=0.0, deep=12.3, singularity=0.9
+
+duplicates / new by tier (mean):
+  tier 1 (15 exist): new= 15.0  dupes=   972.3  duplicate rate= 98.5%
+  tier 2 (13 exist): new= 13.0  dupes=   398.5  duplicate rate= 96.8%
+  tier 3 (10 exist): new= 10.0  dupes=   171.0  duplicate rate= 94.5%
+  tier 4 ( 8 exist): new=  8.0  dupes=    59.9  duplicate rate= 88.2%
+  tier 5 ( 4 exist): new=  3.9  dupes=    11.8  duplicate rate= 74.9%
+
+Flux/sec curve (median across players):
+   day  owned       flux/sec     pulls  pulls/day       faint cost
+     0     10          31.12        12       12.0            7,469
+     1     37         698.96       114      102.0        1,593,623
+     2     41       1,770.51       153       39.0        5,417,754
+     3     42       2,186.13       186       33.0        8,132,413
+     5     44       2,746.18       237       24.0       13,016,904
+     7     45       3,469.73       282       21.0       19,569,290
+    14     47       4,691.23       396       15.0       37,154,552
+    21     48       5,988.58       493       12.0       59,047,375
+    30     49       6,508.65       597       12.0       65,086,540
+    45     49       7,986.19       775       12.0       79,861,928
+    60     50      12,693.14       953       12.0      126,931,387
+    90     50      13,517.39     1,307       12.0      135,173,894
+   120     50      14,039.75     1,663       12.0      140,397,474
