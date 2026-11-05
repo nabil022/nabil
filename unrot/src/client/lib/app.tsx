@@ -3,7 +3,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { Me } from '../../engine/ops/account';
-import { ApiError, httpApi, type Api } from './api';
+import { ApiError, httpApi, setServerUrl, type Api } from './api';
 import { storage } from './storage';
 
 export const STANDALONE = import.meta.env.VITE_STANDALONE === '1';
@@ -30,6 +30,8 @@ interface AppValue {
   signOut(): Promise<void>;
   startDemo(): Promise<void>;
   exitDemo(): void;
+  /** Android app: point at a server (after checking it answers) and reconnect. */
+  connectServer(url: string | null): Promise<void>;
   resetDemo(): Promise<void>;
   toast(text: string, tone?: Toast['tone']): void;
   toasts: Toast[];
@@ -111,9 +113,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
     void boot(mode);
   }, [boot]);
 
+  const refresh = useCallback(() => setVersion((v) => v + 1), []);
+
   const value = useMemo<AppValue | null>(() => {
     if (!api) return null;
-    const refresh = () => setVersion((v) => v + 1);
     return {
       api,
       me,
@@ -143,6 +146,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
       exitDemo() {
         storage.set(MODE_KEY, null);
         void boot('server');
+      },
+      async connectServer(url) {
+        if (url) {
+          const res = await fetch(`${url}/api/info`).catch(() => null);
+          const info = res && res.ok ? ((await res.json().catch(() => null)) as { name?: string } | null) : null;
+          if (info?.name !== 'Unrot') throw new Error('No Unrot server answered at that address. Check it and your connection.');
+        }
+        api.setToken(null);
+        setServerUrl(url);
+        storage.set(MODE_KEY, null);
+        await boot('server');
       },
       async resetDemo() {
         await api.reset?.();
@@ -179,7 +193,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         }
       },
     };
-  }, [api, me, ready, version, toast, toasts, theme, boot, loadMe]);
+  }, [api, me, ready, version, refresh, toast, toasts, theme, boot, loadMe]);
 
   if (!value) return null;
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

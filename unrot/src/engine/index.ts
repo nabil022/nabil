@@ -82,6 +82,7 @@ on('DELETE', '/api/me', (ctx, c) => (account.deleteAccount(ctx, c.user, c.body),
 on('GET', '/api/dashboard', (ctx, c) => logs.dashboard(ctx, c.user));
 on('GET', '/api/logs', (ctx, c) => logs.getLogs(ctx, c.user, c.query));
 on('PUT', '/api/logs/:date', (ctx, c) => logs.saveLog(ctx, c.user, c.params.date!, c.body));
+on('PUT', '/api/logs/:date/usage', (ctx, c) => logs.saveUsage(ctx, c.user, c.params.date!, c.body));
 on('GET', '/api/stats', (ctx, c) => logs.stats(ctx, c.user, c.query));
 
 on('GET', '/api/challenges', (ctx, c) => challenges.challengesView(ctx, c.user));

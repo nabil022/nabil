@@ -1,12 +1,16 @@
 import type { Dashboard } from '../../engine/ops/logs';
+import { appName } from '../../shared/apps';
 import { addDays, datesBetween, parseHM, shortDate } from '../../shared/dates';
 import { fmtCut, fmtMin, ordinal } from '../../shared/format';
 import { formatCents } from '../../shared/money';
 import { useApp, useQuery } from '../lib/app';
+import { getReminders, applyReminders } from '../lib/reminders';
 import { Link, useRouter } from '../lib/router';
+import { useTracking } from '../lib/tracking-context';
+import { useState } from 'react';
 import { RotMeter, WeekBars, type WeekPoint } from '../ui/charts';
 import { Icon } from '../ui/icons';
-import { Card, ErrorNote, Loading, Meter, Pill, Screen, Section } from '../ui/kit';
+import { Button, Card, ErrorNote, Loading, Meter, Pill, Screen, Section } from '../ui/kit';
 
 function greeting(nowMin: number): string {
   if (nowMin < 5 * 60) return 'Still up';
@@ -40,6 +44,89 @@ function CutoffBanner({ nowMin, cutoff }: { nowMin: number; cutoff: string }) {
       </div>
       <Icon name="next" />
     </Link>
+  );
+}
+
+/** Android: switch tracking on, then show today so far straight from the phone. */
+function PhoneCard() {
+  const { me, toast } = useApp();
+  const { state, enable } = useTracking();
+  const [reminders, setReminders] = useState(getReminders());
+  if (!state.supported || state.granted === null) return null;
+  if (!state.granted) {
+    return (
+      <Card tone="brand">
+        <div className="row" style={{ alignItems: 'flex-start' }}>
+          <Icon name="phone" size={26} className="ink-brand" />
+          <div className="grow">
+            <div className="card-title">Track screen time automatically</div>
+            <p className="card-sub" style={{ marginTop: 4 }}>
+              Unrot can read your app time from Android, the same numbers as Digital Wellbeing, so you never type them. On the next screen, find Unrot and switch on
+              Usage access.
+            </p>
+            <Button style={{ marginTop: 10 }} icon="phone" onClick={() => void enable()}>
+              Turn on tracking
+            </Button>
+          </div>
+        </div>
+      </Card>
+    );
+  }
+  const today = state.today;
+  const total = today ? Object.values(today.apps).reduce((a, b) => a + b, 0) : 0;
+  const top = today
+    ? Object.entries(today.apps)
+        .filter(([, m]) => m > 0)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 3)
+    : [];
+  return (
+    <Card>
+      <div className="row" style={{ alignItems: 'flex-start' }}>
+        <div className="grow">
+          <div className="eyebrow">Today so far, from your phone</div>
+          <div className="big-number" style={{ marginTop: 4 }}>
+            {fmtMin(total)}
+          </div>
+          <div className="card-sub">
+            {top.length ? top.map(([a, m]) => `${appName(a)} ${fmtMin(m)}`).join(' · ') : 'Nothing on your tracked apps yet today.'}
+          </div>
+        </div>
+        <Pill tone="fresh" icon="phone">
+          Auto
+        </Pill>
+      </div>
+      <p className="tiny" style={{ marginTop: 8 }}>
+        {state.lastSync ? `Yesterday saved automatically. ` : ''}Today is saved tomorrow morning, when it's finished.
+      </p>
+      {!reminders.asked ? (
+        <div className="row" style={{ marginTop: 10, gap: 8 }}>
+          <Button
+            size="sm"
+            variant="secondary"
+            icon="bell"
+            onClick={async () => {
+              const next = { morning: true, morningTime: '08:30', cutoff: true };
+              const r = await applyReminders(next, me!.cutoff);
+              setReminders({ ...next, asked: true });
+              toast(r === 'denied' ? 'Notifications are blocked for Unrot in Android settings.' : `Reminders on: 08:30 and ${me!.cutoff}`, r === 'denied' ? 'bad' : 'good');
+            }}
+          >
+            Remind me at 08:30 and {me!.cutoff}
+          </Button>
+          <Button
+            size="sm"
+            variant="quiet"
+            onClick={async () => {
+              await applyReminders({ morning: false, morningTime: '08:30', cutoff: false }, me!.cutoff);
+              setReminders({ ...getReminders(), asked: true });
+            }}
+          >
+            No thanks
+          </Button>
+        </div>
+      ) : null}
+    </Card>
   );
 }
 
@@ -77,7 +164,18 @@ export function Home() {
     >
       <CutoffBanner nowMin={d.nowMin} cutoff={d.cutoff} />
 
-      {!d.checkin.yesterday ? (
+      <PhoneCard />
+
+      {d.checkin.yesterday && d.checkin.yesterdayMeasured && !d.checkin.yesterdayAnswered ? (
+        <Link to={`/checkin/${yesterday}`} className="banner banner-brand">
+          <Icon name="plus" size={26} />
+          <div className="grow">
+            <strong>Finish yesterday ({shortDate(yesterday)})</strong>
+            <div className="muted small">Screen time is in from your phone. Add sleep and mood: 20 seconds.</div>
+          </div>
+          <Icon name="next" />
+        </Link>
+      ) : !d.checkin.yesterday ? (
         <Link to={`/checkin/${yesterday}`} className="banner banner-brand">
           <Icon name="plus" size={26} />
           <div className="grow">

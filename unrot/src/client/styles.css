@@ -2077,3 +2077,10 @@ details.disclose summary {
 .app-label .tiny {
   font-weight: 500;
 }
+
+.measured-value {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 17px;
+}

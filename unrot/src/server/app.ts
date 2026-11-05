@@ -20,6 +20,8 @@ export interface ServerOptions {
   seed: boolean;
   /** Respect X-Forwarded-For (set when running behind a proxy such as Render or Fly). */
   trustProxy: boolean;
+  /** Origins allowed to call the API from elsewhere: the Android app runs at https://localhost. */
+  corsOrigins?: readonly string[];
   /** Development: hand non-API requests to this (Vite) middleware. */
   devMiddleware?: (req: IncomingMessage, res: ServerResponse, next: () => void) => void;
   log?: (msg: string) => void;
@@ -34,6 +36,9 @@ export interface RunningServer {
 }
 
 const MAX_BODY = 64 * 1024;
+
+/** Capacitor serves the Android app from https://localhost (capacitor://localhost on iOS). */
+export const DEFAULT_CORS_ORIGINS: readonly string[] = ['https://localhost', 'capacitor://localhost'];
 
 const TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -158,7 +163,23 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
     return req.socket.remoteAddress ?? 'unknown';
   };
 
+  const corsOrigins = new Set(opts.corsOrigins ?? DEFAULT_CORS_ORIGINS);
+
   async function handleApi(req: IncomingMessage, res: ServerResponse, url: URL): Promise<void> {
+    const origin = req.headers.origin;
+    if (origin && corsOrigins.has(origin)) {
+      // Bearer tokens, no cookies: the token never travels unless the app sends it.
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Vary', 'Origin');
+      res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
+      res.setHeader('Access-Control-Max-Age', '600');
+    }
+    if (req.method === 'OPTIONS') {
+      res.writeHead(204);
+      res.end();
+      return;
+    }
     const ip = clientIp(req);
     if (!apiLimiter.allow(ip)) return send(res, 429, { error: { code: 'rate_limited', message: 'Too many requests. Wait a minute and try again.' } });
     if (req.method === 'POST' && url.pathname.startsWith('/api/auth/') && url.pathname !== '/api/auth/logout' && !authLimiter.allow(ip)) {
@@ -229,7 +250,7 @@ export async function startServer(opts: ServerOptions): Promise<RunningServer> {
     };
     if (url.pathname.startsWith('/api/')) {
       handleApi(req, res, url).catch(done);
-    } else if (req.method !== 'GET' && req.method !== 'HEAD') {
+    } else if (req.method !== 'GET' && req.method !== 'HEAD' && req.method !== 'OPTIONS') {
       send(res, 405, { error: { code: 'method_not_allowed', message: 'Not allowed.' } });
     } else if (opts.devMiddleware) {
       opts.devMiddleware(req, res, () => send(res, 404, { error: { code: 'not_found', message: 'Not found.' } }));

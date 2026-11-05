@@ -363,3 +363,59 @@ describe('store transactions', () => {
     expect(saved).toEqual(['meta/meta/put', 'meta/meta/del']);
   });
 });
+
+describe('phone-measured screen time (Android)', () => {
+  it('merges measured minutes, keeps typed answers, and does not let a check-in edit them down', () => {
+    const h = new Harness(`${MON}T08:00:00Z`);
+    const a = h.person('Ann', { baseline: { tiktok: 120, instagram: 60, other: 30 } });
+    const y = addDays(MON, -1);
+    // Typed first, in the evening.
+    h.log(a.token, y, { tiktok: 30, instagram: 10, other: 20 }, { mood: 4, bedtime: '23:00', wakeTime: '07:00' });
+    // Then the phone syncs the real numbers.
+    const synced = h.call('PUT', `/api/logs/${y}/usage`, a.token, {
+      source: 'android',
+      measuredApps: ['tiktok', 'instagram'],
+      apps: { tiktok: 95, instagram: 40 },
+      lateNightMin: 25,
+    });
+    expect(synced.log.apps).toEqual({ tiktok: 95, instagram: 40, other: 20 });
+    expect(synced.log.mood).toBe(4);
+    expect(synced.log.sleepMin).toBe(480);
+    expect(synced.log.lateNightMin).toBe(25);
+    expect(synced.log.measured).toMatchObject({ apps: ['tiktok', 'instagram'], lateNight: true, source: 'android' });
+    // A later check-in can change 'other' and add answers, but not the measured numbers.
+    const after = h.log(a.token, y, { tiktok: 5, instagram: 5, other: 15 }, { lateNightMin: 0, mood: 5 });
+    expect(after.log.apps).toEqual({ tiktok: 95, instagram: 40, other: 15 });
+    expect(after.log.lateNightMin).toBe(25);
+    expect(after.log.mood).toBe(5);
+    expect(after.log.measured.apps).toEqual(['tiktok', 'instagram']);
+  });
+
+  it('creates a day from measurements alone, without the check-in XP', () => {
+    const h = new Harness(`${MON}T08:00:00Z`);
+    const a = h.person('Ann', { baseline: { tiktok: 120 } });
+    const r = h.call('PUT', `/api/logs/${addDays(MON, -1)}/usage`, a.token, { source: 'android', measuredApps: ['tiktok'], apps: { tiktok: 60 } });
+    // Under the 120 min goal: +15, but no +10 for checking in until they answer the rest.
+    expect(r.xpGained).toBe(15);
+    expect(r.log.lateNightMin).toBeNull();
+    expect(r.log.mood).toBeNull();
+    const checkin = h.log(a.token, addDays(MON, -1), {}, { mood: 3 });
+    expect(checkin.xpGained).toBe(10);
+  });
+
+  it('validates syncs and shows tracked days on the group board', () => {
+    const h = new Harness(`${MON}T08:00:00Z`);
+    const a = h.person('Ann', { baseline: { tiktok: 120 } });
+    const p = (date: string, body: unknown) => h.fail('PUT', `/api/logs/${date}/usage`, a.token, body);
+    expect(p(addDays(MON, -2), { source: 'android', measuredApps: ['tiktok'], apps: { tiktok: 1 } }).code).toBe('date_locked');
+    expect(p(MON, { source: 'ios', measuredApps: ['tiktok'], apps: {} }).status).toBe(400);
+    expect(p(MON, { source: 'android', measuredApps: ['tiktok'], apps: { instagram: 5 } }).status).toBe(400);
+    expect(p(MON, { source: 'android', measuredApps: ['nope'], apps: {} }).status).toBe(400);
+    const { groupId } = h.call('POST', '/api/groups', a.token, { name: 'G', apps: ['tiktok'] });
+    h.at(`${MON}T21:00:00Z`);
+    h.call('PUT', `/api/logs/${MON}/usage`, a.token, { source: 'android', measuredApps: ['tiktok'], apps: { tiktok: 50 } });
+    h.at(`${addDays(MON, 1)}T08:00:00Z`);
+    const g = h.call('GET', `/api/groups/${groupId}`, a.token);
+    expect(g.week.rows[0].measuredDays).toBe(1);
+  });
+});

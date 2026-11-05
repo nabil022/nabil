@@ -10,7 +10,12 @@ import { AGE_GROUPS, type AgeGroup } from '../../shared/health';
 import { formatCents } from '../../shared/money';
 import { AVATARS, AVATAR_COLORS } from '../../shared/profile';
 import { STANDALONE, useApp, useQuery, type Theme } from '../lib/app';
+import { serverUrl } from '../lib/api';
 import { downloadText } from '../lib/download';
+import { IS_NATIVE } from '../lib/native';
+import { applyReminders, getReminders } from '../lib/reminders';
+import { getExtras, setExtras, topApps, type AppUse } from '../lib/tracking';
+import { useTracking } from '../lib/tracking-context';
 import { Link, useRouter } from '../lib/router';
 import { DayBars, HBars } from '../ui/charts';
 import { BrainMark, Icon, type IconName } from '../ui/icons';
@@ -187,11 +192,26 @@ export function Settings() {
               <MinutesInput id="s-goal" label="Daily goal" value={me.dailyGoalMin} onChange={(v) => void patch({ dailyGoalMin: v }, 'Goal saved')} step={15} />
             </Field>
             <Field label="Nightly cut-off" htmlFor="s-cutoff">
-              <input id="s-cutoff" className="input" type="time" defaultValue={me.cutoff} onBlur={(e) => e.target.value && e.target.value !== me.cutoff && void patch({ cutoff: e.target.value }, 'Cut-off saved')} />
+              <input
+                id="s-cutoff"
+                className="input"
+                type="time"
+                defaultValue={me.cutoff}
+                onBlur={(e) => {
+                  const v = e.target.value;
+                  if (!v || v === me.cutoff) return;
+                  void patch({ cutoff: v }, 'Cut-off saved').then(() => {
+                    const r = getReminders();
+                    if (r.cutoff || r.morning) void applyReminders(r, v);
+                  });
+                }}
+              />
             </Field>
           </div>
         </Card>
       </Section>
+
+      {IS_NATIVE ? <PhoneTracking /> : null}
 
       <Section title="Privacy and look">
         <Card>
@@ -255,6 +275,14 @@ export function Settings() {
                 <span className="kv-k">Email</span>
                 <span className="kv-v">{me.email}</span>
               </div>
+              {IS_NATIVE && serverUrl() ? (
+                <div className="kv">
+                  <span className="kv-k">Server</span>
+                  <span className="kv-v" style={{ overflowWrap: 'anywhere' }}>
+                    {serverUrl().replace(/^https?:\/\//, '')}
+                  </span>
+                </div>
+              ) : null}
               <Button variant="secondary" icon="logout" onClick={() => signOut().then(() => go('/', { replace: true }))}>
                 Log out
               </Button>
@@ -285,6 +313,144 @@ export function Settings() {
         </Field>
       </Confirm>
     </Screen>
+  );
+}
+
+/** Android only: tracking status, which apps count, and reminders. */
+function PhoneTracking() {
+  const { me, mutate, toast } = useApp();
+  const { state, refresh, enable } = useTracking();
+  const [apps, setApps] = useState<AppUse[] | null>(null);
+  const [extras, setExtrasState] = useState(getExtras());
+  const [rem, setRem] = useState(getReminders());
+  const [loading, setLoading] = useState(false);
+  if (!me) return null;
+
+  const loadApps = async () => {
+    setLoading(true);
+    try {
+      setApps(await topApps(me));
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Could not read your apps.', 'bad');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const toggleExtra = async (a: AppUse) => {
+    const next = { ...extras };
+    if (next[a.pkg]) delete next[a.pkg];
+    else next[a.pkg] = 'other';
+    setExtras(next);
+    setExtrasState(next);
+    // Counting an app as "Other apps" means tracking that category too.
+    if (Object.values(next).includes('other') && !me.apps.includes('other')) {
+      await mutate('PATCH', '/api/me', { apps: [...me.apps, 'other'] });
+    }
+    setApps((list) => list?.map((x) => (x.pkg === a.pkg ? { ...x, picked: !x.picked, app: x.picked ? null : 'other' } : x)) ?? null);
+    void refresh(true);
+  };
+
+  const setReminder = async (patch: Partial<typeof rem>) => {
+    const next = { ...rem, ...patch };
+    const r = await applyReminders(next, me.cutoff);
+    setRem({ ...next, asked: true });
+    if (r === 'denied') toast('Notifications are blocked for Unrot. Allow them in Android settings.', 'bad');
+  };
+
+  return (
+    <Section title="Phone tracking">
+      <Card>
+        <div className="stack" style={{ gap: 12 }}>
+          <div className="row">
+            <Icon name="phone" size={22} className={state.granted ? 'ink-fresh' : 'ink-brand'} />
+            <div className="grow">
+              <div style={{ fontWeight: 700 }}>{state.granted ? 'Screen time is measured automatically' : 'Automatic tracking is off'}</div>
+              <div className="tiny">
+                {state.granted
+                  ? `Read from Android's usage records. ${state.lastSync ? `Last saved: ${shortDate(state.lastSync.date)}.` : ''}`
+                  : 'Switch on Usage access for Unrot to stop typing minutes in.'}
+              </div>
+            </div>
+          </div>
+          <div className="wrap">
+            {state.granted ? (
+              <Button variant="secondary" size="sm" icon="refresh" busy={state.syncing} onClick={() => refresh(true).then(() => toast('Synced', 'good'))}>
+                Sync now
+              </Button>
+            ) : null}
+            <Button variant="secondary" size="sm" icon="sliders" onClick={() => void enable()}>
+              {state.granted ? 'Usage access settings' : 'Turn on tracking'}
+            </Button>
+          </div>
+          {state.error ? <p className="small ink-danger">{state.error}</p> : null}
+        </div>
+      </Card>
+      {state.granted ? (
+        <Card>
+          <div className="card-title">Apps that count</div>
+          <p className="card-sub" style={{ marginTop: 4 }}>
+            TikTok, Instagram, YouTube and the rest are recognised automatically, and games by their Play Store category. Pick anything else you want counted as "Other apps".
+          </p>
+          {apps === null ? (
+            <Button variant="secondary" size="sm" busy={loading} style={{ marginTop: 10 }} onClick={() => void loadApps()}>
+              Show my most-used apps
+            </Button>
+          ) : (
+            <div className="list" style={{ marginTop: 6 }}>
+              {apps.map((a) => (
+                <div className="list-item" key={a.pkg}>
+                  <div className="grow">
+                    <div className="list-title">{a.label}</div>
+                    <div className="list-sub">{fmtMin(a.minPerDay)} a day</div>
+                  </div>
+                  {a.app && !a.picked ? (
+                    me.apps.includes(a.app) ? (
+                      <Pill tone="fresh" icon="check">
+                        {appName(a.app)}
+                      </Pill>
+                    ) : (
+                      <Pill>{appName(a.app)}: not tracked</Pill>
+                    )
+                  ) : (
+                    <Chip selected={a.picked} onClick={() => void toggleExtra(a)}>
+                      {a.picked ? 'Counts as Other' : 'Count it'}
+                    </Chip>
+                  )}
+                </div>
+              ))}
+              {apps.length === 0 ? <p className="muted small">No app use recorded in the last week yet.</p> : null}
+            </div>
+          )}
+          {Object.values(extras).includes('other') && me.baseline?.perApp.other === undefined ? (
+            <p className="small" style={{ marginTop: 10 }}>
+              Now add your normal for Other apps, so cuts are measured fairly: <Link to="/settings/baseline">set it</Link>.
+            </p>
+          ) : null}
+          <p className="tiny" style={{ marginTop: 10 }}>
+            Apps marked "not tracked" don't count. Add them under Apps you track if you want them to.
+          </p>
+        </Card>
+      ) : null}
+      <Card>
+        <div className="stack" style={{ gap: 12 }}>
+          <Toggle
+            id="rem-morning"
+            checked={rem.morning}
+            onChange={(v) => void setReminder({ morning: v })}
+            label={`Morning check-in reminder (${rem.morningTime})`}
+            detail="Screen time fills itself in; this reminds you to add sleep and mood."
+          />
+          <Toggle
+            id="rem-cutoff"
+            checked={rem.cutoff}
+            onChange={(v) => void setReminder({ cutoff: v })}
+            label={`Cut-off alert (${me.cutoff})`}
+            detail="A nudge to put the phone down when your cut-off starts."
+          />
+        </div>
+      </Card>
+    </Section>
   );
 }
 

@@ -57,6 +57,16 @@ describe('HTTP server', () => {
     const huge = await fetch(`${s.url}/api/auth/login`, { method: 'POST', body: JSON.stringify({ x: 'a'.repeat(70_000) }) }).catch(() => null);
     expect(huge === null || huge.status === 413).toBe(true);
 
+    // The Android app (https://localhost) may call the API; other sites may not.
+    const pre = await fetch(`${s.url}/api/me`, { method: 'OPTIONS', headers: { Origin: 'https://localhost', 'Access-Control-Request-Method': 'GET' } });
+    expect(pre.status).toBe(204);
+    expect(pre.headers.get('access-control-allow-origin')).toBe('https://localhost');
+    expect(pre.headers.get('access-control-allow-headers')).toContain('Authorization');
+    const fromApp = await fetch(`${s.url}/api/me`, { headers: { Origin: 'https://localhost', Authorization: `Bearer ${token}` } });
+    expect(fromApp.headers.get('access-control-allow-origin')).toBe('https://localhost');
+    const evil = await fetch(`${s.url}/api/me`, { headers: { Origin: 'https://evil.example', Authorization: `Bearer ${token}` } });
+    expect(evil.headers.get('access-control-allow-origin')).toBeNull();
+
     // Static hosting: the shell, long-cached assets, no path traversal.
     const shell = await fetch(`${s.url}/`);
     expect(shell.status).toBe(200);

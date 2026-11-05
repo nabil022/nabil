@@ -25,9 +25,36 @@ export interface Api {
 }
 
 const TOKEN_KEY = 'unrot.token';
+const SERVER_KEY = 'unrot.server';
+
+/**
+ * Where the API lives. The web app uses its own origin (''); the Android app
+ * runs from https://localhost on the phone, so it needs the server's address.
+ */
+export function serverUrl(): string {
+  return (storage.get(SERVER_KEY) ?? import.meta.env.VITE_SERVER_URL ?? '').replace(/\/+$/, '');
+}
+
+export function setServerUrl(url: string | null): void {
+  storage.set(SERVER_KEY, url ? url.trim().replace(/\/+$/, '') : null);
+}
+
+/** Normalise what someone typed into an https URL, or null if it can't be one. */
+export function normaliseServerUrl(input: string): string | null {
+  let s = input.trim();
+  if (!s) return null;
+  if (!/^https?:\/\//i.test(s)) s = `https://${s}`;
+  try {
+    const u = new URL(s);
+    return `${u.protocol}//${u.host}${u.pathname.replace(/\/+$/, '')}`;
+  } catch {
+    return null;
+  }
+}
 
 export function httpApi(): Api {
   let token = storage.get(TOKEN_KEY);
+  const base = serverUrl();
   return {
     mode: 'server',
     get token() {
@@ -40,7 +67,7 @@ export function httpApi(): Api {
     async call<T>(method: string, path: string, body?: unknown): Promise<T> {
       let res: Response;
       try {
-        res = await fetch(path, {
+        res = await fetch(`${base}${path}`, {
           method,
           headers: {
             Accept: 'application/json',

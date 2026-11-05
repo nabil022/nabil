@@ -4,10 +4,13 @@ import { APPS, appName } from '../../shared/apps';
 import { fmtMin } from '../../shared/format';
 import { verdict } from '../../shared/scoring';
 import { useApp } from '../lib/app';
+import { IS_NATIVE, UsageStats, onResume } from '../lib/native';
 import { useRouter } from '../lib/router';
 import { storage } from '../lib/storage';
-import { BrainMark } from '../ui/icons';
+import { measuredBaseline } from '../lib/tracking';
+import { BrainMark, Icon } from '../ui/icons';
 import { Button, Card, Chip, Field, MinutesInput, Stepper } from '../ui/kit';
+import { useEffect } from 'react';
 
 const STEPS = ['Apps', 'Your normal', 'Goals'];
 
@@ -21,7 +24,42 @@ export function Onboarding() {
   const [usualSteps, setUsualSteps] = useState(String(me?.baseline?.usualSteps ?? ''));
   const [goalPct, setGoalPct] = useState(30);
   const [busy, setBusy] = useState(false);
+  const [measuredDays, setMeasuredDays] = useState<number | null>(null);
+  const [waiting, setWaiting] = useState(false);
   const total = apps.reduce((a, id) => a + (baseline[id] ?? 0), 0);
+
+  // Android: fill "your normal" from the phone's last week.
+  const measureNow = async () => {
+    if (!me) return;
+    const { granted } = await UsageStats.status();
+    if (!granted) {
+      setWaiting(true);
+      await UsageStats.openSettings();
+      return;
+    }
+    try {
+      const r = await measuredBaseline({ timezone: me.timezone, cutoff: cutoff, apps, today: me.today });
+      if (r.days === 0) {
+        toast('Your phone has no usage records yet. Enter your normal by hand for now.', 'bad');
+        return;
+      }
+      setBaseline((b) => ({ ...b, ...Object.fromEntries(apps.map((a) => [a, r.perApp[a] ?? b[a] ?? 0])) }));
+      setMeasuredDays(r.days);
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Could not read screen time.', 'bad');
+    }
+  };
+  useEffect(
+    () =>
+      onResume(() => {
+        if (waiting) {
+          setWaiting(false);
+          void measureNow();
+        }
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [waiting, apps],
+  );
   const goal = Math.max(15, Math.round((total * (1 - goalPct / 100)) / 5) * 5);
 
   const finish = async () => {
@@ -75,10 +113,31 @@ export function Onboarding() {
 
         {step === 1 ? (
           <>
-            <p className="lead">
-              How long do you spend on each, on a normal day? Your phone already knows: <strong>Settings › Screen Time</strong> on iPhone, or{' '}
-              <strong>Settings › Digital Wellbeing</strong> on Android. Use last week's daily average.
-            </p>
+            {IS_NATIVE ? (
+              <Card tone="brand">
+                <div className="row" style={{ alignItems: 'flex-start' }}>
+                  <Icon name="phone" size={24} className="ink-brand" />
+                  <div className="grow">
+                    <div className="card-title">{measuredDays ? `Measured from your last ${measuredDays} days` : 'Let your phone fill this in'}</div>
+                    <p className="card-sub" style={{ marginTop: 4 }}>
+                      {measuredDays
+                        ? 'These are your real daily averages. Adjust them if last week was unusual.'
+                        : "Unrot reads last week's app time from Android. Switch on Usage access for Unrot on the next screen."}
+                    </p>
+                    {!measuredDays ? (
+                      <Button style={{ marginTop: 10 }} icon="phone" onClick={() => void measureNow()}>
+                        Measure my last week
+                      </Button>
+                    ) : null}
+                  </div>
+                </div>
+              </Card>
+            ) : (
+              <p className="lead">
+                How long do you spend on each, on a normal day? Your phone already knows: <strong>Settings › Screen Time</strong> on iPhone, or{' '}
+                <strong>Settings › Digital Wellbeing</strong> on Android. Use last week's daily average.
+              </p>
+            )}
             <Card>
               {apps.map((id) => (
                 <div className="app-row" key={id}>

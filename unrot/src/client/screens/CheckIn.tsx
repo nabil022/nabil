@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { DayView, SaveLogResult } from '../../engine/ops/logs';
 import { APPS, appName } from '../../shared/apps';
 import { CREDIT } from '../../shared/balance';
@@ -8,8 +8,10 @@ import { creditFor, stepCredit, usualStepsOf } from '../../shared/scoring';
 import { sleepMinutes } from '../../shared/sleep';
 import type { LogDoc } from '../../shared/types';
 import { useApp, useQuery } from '../lib/app';
+import { IS_NATIVE } from '../lib/native';
 import { useRouter } from '../lib/router';
-import { Button, Card, Chip, ErrorNote, Field, Likert, Loading, MinutesInput, Screen, Section, Segmented } from '../ui/kit';
+import { useTracking } from '../lib/tracking-context';
+import { Button, Card, Chip, ErrorNote, Field, Likert, Loading, MinutesInput, Pill, Screen, Section, Segmented } from '../ui/kit';
 
 const LATE_OPTIONS = [0, 15, 30, 60, 90, 120];
 
@@ -51,9 +53,13 @@ export function CheckIn({ date: dateParam }: { date?: string }) {
   const yesterday = addDays(today, -1);
   const q = useQuery<{ days: DayView[] }>(`/api/logs?from=${addDays(today, -3)}&to=${today}`);
   const days = q.data?.days;
-  const logged = (d: string) => !!days?.find((x) => x.date === d)?.log;
+  // "Done" means the person's own answers are in, not just phone-measured minutes.
+  const done = (d: string) => {
+    const l = days?.find((x) => x.date === d)?.log;
+    return !!l && [l.sleepMin, l.steps, l.activeMin, l.mood, l.energy, l.focus, l.stress, l.lateHomework].some((v) => v !== null && v !== undefined);
+  };
   const [date, setDate] = useState<string | null>(dateParam === today || dateParam === yesterday ? dateParam : null);
-  const chosen = date ?? (days ? (logged(yesterday) ? today : yesterday) : null);
+  const chosen = date ?? (days ? (done(yesterday) ? today : yesterday) : null);
   const apps = useMemo(() => {
     const set = new Set(me!.apps);
     const log = days?.find((x) => x.date === chosen)?.log;
@@ -62,13 +68,29 @@ export function CheckIn({ date: dateParam }: { date?: string }) {
   }, [me, days, chosen]);
   const [form, setForm] = useState<Form | null>(null);
   const [busy, setBusy] = useState(false);
+  const { state: tracking, refresh: syncPhone } = useTracking();
+  // Once someone starts typing, a background refresh only updates the measured fields.
+  const touched = useRef<string | null>(null);
+  const measured = days?.find((x) => x.date === chosen)?.log?.measured ?? null;
+
+  useEffect(() => {
+    if (IS_NATIVE) void syncPhone(true);
+  }, [syncPhone]);
 
   useEffect(() => {
     if (!days || !chosen) return;
     const log = days.find((x) => x.date === chosen)?.log ?? null;
     const latest = [...days].reverse().find((x) => x.log && x.date !== chosen)?.log ?? null;
-    setForm(fromLog(log, latest, apps));
-    // Only reset when the day or the loaded data changes, not on every keystroke.
+    const fresh = fromLog(log, latest, apps);
+    setForm((prev) => {
+      if (!prev || touched.current !== chosen) return fresh;
+      const m = log?.measured;
+      if (!m) return prev;
+      const apps2 = { ...prev.apps };
+      for (const a of m.apps) apps2[a] = fresh.apps[a] ?? 0;
+      return { ...prev, apps: apps2, lateNightMin: m.lateNight ? fresh.lateNightMin : prev.lateNightMin };
+    });
+    // Only re-run when the day or the loaded data changes, not on every keystroke.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [days, chosen]);
 
@@ -76,7 +98,11 @@ export function CheckIn({ date: dateParam }: { date?: string }) {
     return <Screen title="Check in" back="/">{q.error ? <ErrorNote error={q.error} retry={q.reload} /> : <Loading />}</Screen>;
   }
 
-  const set = <K extends keyof Form>(k: K, v: Form[K]) => setForm({ ...form, [k]: v });
+  const set = <K extends keyof Form>(k: K, v: Form[K]) => {
+    touched.current = chosen;
+    setForm({ ...form, [k]: v });
+  };
+  const isMeasured = (app: string) => !!measured?.apps.includes(app);
   const raw = Object.values(form.apps).reduce((a, b) => a + b, 0);
   const steps = form.steps === '' ? null : Number(form.steps);
   const challengeMin = days.find((x) => x.date === chosen)?.challengeCredit ?? 0;
@@ -114,15 +140,19 @@ export function CheckIn({ date: dateParam }: { date?: string }) {
         value={chosen}
         onChange={(v) => setDate(v)}
         options={[
-          { value: yesterday, label: `Yesterday${logged(yesterday) ? ' ✓' : ''}` },
-          { value: today, label: `Today${logged(today) ? ' ✓' : ''}` },
+          { value: yesterday, label: `Yesterday${done(yesterday) ? ' ✓' : ''}` },
+          { value: today, label: `Today${done(today) ? ' ✓' : ''}` },
         ]}
       />
 
       <Section title={`Screen time · ${shortDate(chosen)}`}>
         <Card>
           <p className="tiny" style={{ marginBottom: 6 }}>
-            Copy each app's time from Screen Time (iPhone) or Digital Wellbeing (Android) for {chosen === today ? 'today so far' : 'yesterday'}.
+            {measured
+              ? 'Measured by your phone. Measured apps can\'t be edited, so every number on the leaderboard is real.'
+              : IS_NATIVE && tracking.granted && chosen === today
+                ? 'Today is measured automatically and saved tomorrow morning, once the day is over.'
+                : `Copy each app's time from Screen Time (iPhone) or Digital Wellbeing (Android) for ${chosen === today ? 'today so far' : 'yesterday'}.`}
           </p>
           {apps.map((id) => (
             <div className="app-row" key={id}>
@@ -131,7 +161,16 @@ export function CheckIn({ date: dateParam }: { date?: string }) {
                 <span>{appName(id)}</span>
                 {base[id] !== undefined ? <span className="tiny">normal {fmtMin(base[id]!)}</span> : null}
               </span>
-              <MinutesInput id={`ci-${id}`} label={appName(id)} value={form.apps[id] ?? 0} onChange={(m) => set('apps', { ...form.apps, [id]: m })} />
+              {isMeasured(id) ? (
+                <span className="measured-value">
+                  <Pill tone="fresh" icon="phone">
+                    From phone
+                  </Pill>
+                  <strong className="tabular">{fmtMin(form.apps[id] ?? 0)}</strong>
+                </span>
+              ) : (
+                <MinutesInput id={`ci-${id}`} label={appName(id)} value={form.apps[id] ?? 0} onChange={(m) => set('apps', { ...form.apps, [id]: m })} />
+              )}
             </div>
           ))}
           <hr className="divider" />
@@ -166,15 +205,27 @@ export function CheckIn({ date: dateParam }: { date?: string }) {
               </Field>
             </div>
             {sleep !== null ? <p className="small muted">That's {fmtMin(sleep)} of sleep.</p> : null}
-            <Field label={`Phone time after your ${me!.cutoff} cut-off`}>
-              <div className="wrap">
-                {LATE_OPTIONS.map((m) => (
-                  <Chip key={m} selected={form.lateNightMin === m} onClick={() => set('lateNightMin', form.lateNightMin === m ? null : m)}>
-                    {m === 0 ? 'None' : m >= 120 ? '2h+' : fmtMin(m)}
-                  </Chip>
-                ))}
+            {measured?.lateNight ? (
+              <div className="kv">
+                <span className="kv-k">Phone time after your {me!.cutoff} cut-off</span>
+                <span className="kv-v">
+                  <Pill tone="fresh" icon="phone">
+                    From phone
+                  </Pill>{' '}
+                  {form.lateNightMin === 0 ? 'None' : fmtMin(form.lateNightMin ?? 0)}
+                </span>
               </div>
-            </Field>
+            ) : (
+              <Field label={`Phone time after your ${me!.cutoff} cut-off`}>
+                <div className="wrap">
+                  {LATE_OPTIONS.map((m) => (
+                    <Chip key={m} selected={form.lateNightMin === m} onClick={() => set('lateNightMin', form.lateNightMin === m ? null : m)}>
+                      {m === 0 ? 'None' : m >= 120 ? '2h+' : fmtMin(m)}
+                    </Chip>
+                  ))}
+                </div>
+              </Field>
+            )}
             <Field label="Homework after the cut-off?">
               <Segmented
                 label="Homework after the cut-off"

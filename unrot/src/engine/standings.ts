@@ -37,6 +37,7 @@ export function groupStandings(ctx: Ctx, g: GroupDoc, opts: StandingsOpts): Stan
       today: opts.final ? opts.end : undefined,
     });
     const s = summarize(points, base);
+    const measuredDays = points.filter((p) => p.logged && (ctx.log(u.id, p.date)?.measured?.apps.length ?? 0) > 0).length;
     const metTarget =
       s.days > 0 && (g.scoring === 'percent' ? base > 0 && roundScore(s.pctCut) >= lvl.pctTarget : roundScore(s.avgNet) <= lvl.dailyCapMin);
     rows.push({
@@ -52,6 +53,7 @@ export function groupStandings(ctx: Ctx, g: GroupDoc, opts: StandingsOpts): Stan
       days: s.days,
       loggedDays: s.loggedDays,
       entered: opts.entrants ? opts.entrants.includes(u.id) : m.joinedDate <= opts.start,
+      measuredDays,
       metTarget,
       rank: 0,
       place: null,

@@ -46,6 +46,16 @@ export interface SessionDoc extends Doc {
 
 export type Likert = 1 | 2 | 3 | 4 | 5;
 
+/** Which parts of a day were measured by the phone rather than typed in. */
+export interface Measured {
+  /** App ids whose minutes came from the phone. */
+  apps: string[];
+  /** Minutes after the cut-off came from the phone. */
+  lateNight: boolean;
+  source: 'android';
+  at: number;
+}
+
 /** One day of someone's life. id = `${userId}:${date}`. */
 export interface LogDoc extends Doc {
   userId: string;
@@ -66,6 +76,8 @@ export interface LogDoc extends Doc {
   stress: Likert | null;
   /** Did homework spill past the cut-off on this night? */
   lateHomework: boolean | null;
+  /** Set when the phone measured part of this day (Android app). */
+  measured?: Measured | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -127,6 +139,8 @@ export interface StandingRow {
   loggedDays: number;
   /** In the running for money this period (joined before it started, paid any buy-in). */
   entered: boolean;
+  /** Days in the period whose screen time was measured by the phone. */
+  measuredDays?: number;
   /** Hit the group level's target. */
   metTarget: boolean;
   rank: number;

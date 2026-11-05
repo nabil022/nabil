@@ -4,7 +4,8 @@
 //   npm start       production: API + the built PWA from dist/client
 //
 // Environment: PORT (3000), HOST (0.0.0.0), DATA_DIR (./data) or DB_FILE,
-// TRUST_PROXY=1 behind a reverse proxy, SEED_DEMO=1 to start with the demo world.
+// TRUST_PROXY=1 behind a reverse proxy, SEED_DEMO=1 to start with the demo world,
+// CORS_ORIGINS to change which app origins may call the API (comma-separated).
 
 import { createServer as createHttpServer } from 'node:http';
 import { join } from 'node:path';
@@ -41,6 +42,7 @@ async function main(): Promise<void> {
     staticDir: dev ? null : fileURLToPath(new URL('./client/', import.meta.url)),
     seed: seed || dev,
     trustProxy: process.env.TRUST_PROXY === '1',
+    corsOrigins: process.env.CORS_ORIGINS?.split(',').map((s) => s.trim()).filter(Boolean),
     devMiddleware,
   });
   console.log(`Unrot is running at ${running.url}${dev ? ' (development)' : ''}`);

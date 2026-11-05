@@ -1,0 +1,129 @@
+# Builds the Unrot Android app (unrot/) and proves it runs: tests and
+# typecheck, then the APK, then an Android 14 emulator installs it, grants
+# Usage access, launches it and checks it reads usage data without crashing.
+name: Unrot Android
+
+on:
+  push:
+    paths:
+      - 'unrot/**'
+      - '.github/workflows/unrot-android.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: unrot-android-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Test and build the APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: unrot
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: unrot/package-lock.json
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: gradle
+          cache-dependency-path: |
+            unrot/android/*.gradle*
+            unrot/android/app/*.gradle*
+            unrot/android/gradle/wrapper/gradle-wrapper.properties
+
+      - name: Install
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Build the app into the Android project
+        run: npm run build:android
+
+      - name: Build the APK
+        working-directory: unrot/android
+        run: ./gradlew assembleDebug --no-daemon --stacktrace
+
+      - name: Name the APK
+        run: cp android/app/build/outputs/apk/debug/app-debug.apk unrot-android.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: unrot-android-apk
+          path: unrot/unrot-android.apk
+          if-no-files-found: error
+
+  emulator:
+    name: Install and launch on an emulator
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: unrot-android-apk
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Run on Android 14
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          target: google_apis
+          profile: pixel_6
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
+          script: |
+            adb install -r unrot-android.apk
+            adb shell appops set app.unrot GET_USAGE_STATS allow
+            adb shell monkey -p com.android.settings -c android.intent.category.LAUNCHER 1 || true
+            sleep 5
+            adb logcat -c
+            adb shell am start -W -n app.unrot/.MainActivity
+            sleep 30
+            adb exec-out screencap -p > launch.png
+            adb logcat -d > logcat.txt
+            adb shell pidof app.unrot > pid.txt || true
+
+      - name: Check the app started cleanly
+        run: |
+          echo "--- Unrot and WebView console lines ---"
+          grep -E "\[unrot\]|Capacitor/Console|Capacitor:|AndroidRuntime" logcat.txt | head -120 || true
+          if grep -q "FATAL EXCEPTION" logcat.txt; then
+            echo "::error::The app crashed"; grep -A40 "FATAL EXCEPTION" logcat.txt; exit 1
+          fi
+          if [ ! -s pid.txt ]; then echo "::error::The app is not running after launch"; exit 1; fi
+          if ! grep -q "\[unrot\] usage access: granted=true" logcat.txt; then
+            echo "::error::The app did not report working usage access"; exit 1
+          fi
+          echo "App is running and reads usage data."
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: emulator-launch
+          path: |
+            launch.png
+            logcat.txt
+          if-no-files-found: ignore

@@ -35,17 +35,13 @@ export function saveLog(ctx: Ctx, u: UserDoc, dateParam: string, body: Body): Sa
     throw badRequest(`Check-ins can be added for today and yesterday only. Missed days count as your baseline.`, 'date_locked');
   }
 
-  const appsIn = body.apps ?? {};
-  if (typeof appsIn !== 'object' || Array.isArray(appsIn)) throw badRequest('Send minutes for each app.');
-  const apps: Record<string, number> = {};
-  let total = 0;
-  for (const [id, v] of Object.entries(appsIn as Record<string, unknown>)) {
-    if (!isAppId(id)) throw badRequest(`Unknown app: ${id}.`);
-    const m = int(v, `Minutes on ${appName(id)}`, { min: 0, max: CHECKIN.MAX_APP_MIN });
-    apps[id] = m;
-    total += m;
-  }
-  if (total > 24 * 60) throw badRequest('That adds up to more than 24 hours. Check the minutes.');
+  const existing = ctx.log(u.id, date);
+  const apps = parseApps(body.apps);
+  // Whatever the phone measured stays as measured: a check-in can add the
+  // things a phone can't know, but can't edit the measured minutes down.
+  const measured = existing?.measured ?? null;
+  if (measured) for (const a of measured.apps) apps[a] = existing!.apps[a] ?? 0;
+  checkTotal(apps);
 
   const bedtime = optHm(body.bedtime, 'Bedtime');
   const wakeTime = optHm(body.wakeTime, 'Wake-up time');
@@ -53,14 +49,13 @@ export function saveLog(ctx: Ctx, u: UserDoc, dateParam: string, body: Body): Sa
   if (sleepMin !== null && sleepMin > 16 * 60) throw badRequest('That is more than 16 hours of sleep. Check the bedtime and wake-up time.');
   const likert = (v: unknown, label: string) => optInt(v, label, { min: 1, max: 5 }) as Likert | null;
 
-  const existing = ctx.log(u.id, date);
   const now = ctx.now();
   const doc: LogDoc = {
     id: `${u.id}:${date}`,
     userId: u.id,
     date,
     apps,
-    lateNightMin: optInt(body.lateNightMin, 'Minutes after cut-off', { min: 0, max: 720 }),
+    lateNightMin: measured?.lateNight ? existing!.lateNightMin : optInt(body.lateNightMin, 'Minutes after cut-off', { min: 0, max: 720 }),
     bedtime,
     wakeTime,
     sleepMin,
@@ -71,12 +66,35 @@ export function saveLog(ctx: Ctx, u: UserDoc, dateParam: string, body: Body): Sa
     focus: likert(body.focus, 'Focus'),
     stress: likert(body.stress, 'Stress'),
     lateHomework: optBool(body.lateHomework, 'Late homework'),
+    measured,
     createdAt: existing?.createdAt ?? now,
     updatedAt: now,
   };
   ctx.db.logs.put(doc);
 
-  let xp = ctx.awardXp(u.id, `checkin:${u.id}:${date}`, XP.checkin, 'Daily check-in');
+  const xp = ctx.awardXp(u.id, `checkin:${u.id}:${date}`, XP.checkin, 'Daily check-in') + awardForDay(ctx, u, doc);
+  return { log: doc, xpGained: xp, streak: currentStreak(ctx, u), level: levelInfo(ctx.user(u.id).xp) };
+}
+
+function parseApps(input: unknown): Record<string, number> {
+  const appsIn = input ?? {};
+  if (typeof appsIn !== 'object' || Array.isArray(appsIn)) throw badRequest('Send minutes for each app.');
+  const apps: Record<string, number> = {};
+  for (const [id, v] of Object.entries(appsIn as Record<string, unknown>)) {
+    if (!isAppId(id)) throw badRequest(`Unknown app: ${id}.`);
+    apps[id] = int(v, `Minutes on ${appName(id)}`, { min: 0, max: CHECKIN.MAX_APP_MIN });
+  }
+  return apps;
+}
+
+function checkTotal(apps: Record<string, number>): void {
+  if (Object.values(apps).reduce((a, b) => a + b, 0) > 24 * 60) throw badRequest('That adds up to more than 24 hours. Check the minutes.');
+}
+
+/** XP that follows from what a day contains: under goal, cut-off kept, streaks. */
+function awardForDay(ctx: Ctx, u: UserDoc, doc: LogDoc): number {
+  const date = doc.date;
+  let xp = 0;
   const raw = rawMinutes(doc, u.apps);
   const net = raw - creditFor(raw, doc.steps, usualStepsOf(u.baseline), ctx.challengeMin(u.id, date));
   if (u.dailyGoalMin > 0 && net <= u.dailyGoalMin) {
@@ -91,6 +109,59 @@ export function saveLog(ctx: Ctx, u: UserDoc, dateParam: string, body: Body): Sa
     if (gained) ctx.feedAll(u.id, 'streak', `${u.name} is on a ${streak}-day check-in streak.`, `streak:${u.id}:${date}`);
     xp += gained;
   }
+  return xp;
+}
+
+/**
+ * Screen time measured by the Android app. Only the measured apps (and, once
+ * the night is over, the minutes after the cut-off) are written; everything
+ * typed into the check-in is kept. Measured values always win.
+ */
+export function saveUsage(ctx: Ctx, u: UserDoc, dateParam: string, body: Body): SaveLogResult {
+  const date = parseDate(dateParam, 'Date');
+  const { from, to } = editableRange(ctx, u);
+  if (date < from || date > to) throw badRequest('Only today and yesterday can be synced.', 'date_locked');
+  if (body.source !== 'android') throw badRequest('Unknown source of measurements.');
+  if (!Array.isArray(body.measuredApps) || !body.measuredApps.every(isAppId)) throw badRequest('Say which apps were measured.');
+  const measuredApps = [...new Set(body.measuredApps as string[])];
+  const incoming = parseApps(body.apps);
+  for (const a of Object.keys(incoming)) {
+    if (!measuredApps.includes(a)) throw badRequest(`${appName(a)} was not in the measured apps.`);
+  }
+  const late = optInt(body.lateNightMin, 'Minutes after cut-off', { min: 0, max: 720 });
+
+  const existing = ctx.log(u.id, date);
+  const now = ctx.now();
+  const apps = { ...(existing?.apps ?? {}) };
+  for (const a of measuredApps) apps[a] = incoming[a] ?? 0;
+  checkTotal(apps);
+  const doc: LogDoc = {
+    id: `${u.id}:${date}`,
+    userId: u.id,
+    date,
+    apps,
+    lateNightMin: late ?? existing?.lateNightMin ?? null,
+    bedtime: existing?.bedtime ?? null,
+    wakeTime: existing?.wakeTime ?? null,
+    sleepMin: existing?.sleepMin ?? null,
+    steps: existing?.steps ?? null,
+    activeMin: existing?.activeMin ?? null,
+    mood: existing?.mood ?? null,
+    energy: existing?.energy ?? null,
+    focus: existing?.focus ?? null,
+    stress: existing?.stress ?? null,
+    lateHomework: existing?.lateHomework ?? null,
+    measured: {
+      apps: [...new Set([...(existing?.measured?.apps ?? []), ...measuredApps])],
+      lateNight: late !== null || !!existing?.measured?.lateNight,
+      source: 'android',
+      at: now,
+    },
+    createdAt: existing?.createdAt ?? now,
+    updatedAt: now,
+  };
+  ctx.db.logs.put(doc);
+  const xp = awardForDay(ctx, u, doc);
   return { log: doc, xpGained: xp, streak: currentStreak(ctx, u), level: levelInfo(ctx.user(u.id).xp) };
 }
 
@@ -140,8 +211,12 @@ export interface Dashboard {
   cutoff: string;
   baselineDailyMin: number;
   dailyGoalMin: number;
-  /** `keepStreak`: the streak you would be on if you logged yesterday now. */
-  checkin: { today: boolean; yesterday: boolean; streak: number; keepStreak: number };
+  /**
+   * `keepStreak`: the streak you would be on if you logged yesterday now.
+   * `yesterdayAnswered`: the questions only you can answer (sleep, mood, steps) are in.
+   * `yesterdayMeasured`: yesterday's screen time came from the phone.
+   */
+  checkin: { today: boolean; yesterday: boolean; yesterdayAnswered: boolean; yesterdayMeasured: boolean; streak: number; keepStreak: number };
   latest: DayView | null;
   week: { start: ISODate; end: ISODate; points: DayPoint[]; summary: Summary };
   level: LevelInfo;
@@ -173,6 +248,8 @@ export function dashboard(ctx: Ctx, u: UserDoc): Dashboard {
     checkin: {
       today: !!ctx.log(u.id, today),
       yesterday: !!ctx.log(u.id, addDays(today, -1)),
+      yesterdayAnswered: answered(ctx.log(u.id, addDays(today, -1))),
+      yesterdayMeasured: (ctx.log(u.id, addDays(today, -1))?.measured?.apps.length ?? 0) > 0,
       streak: currentStreak(ctx, u),
       keepStreak: 1 + streakEndingAt(ctx, u.id, addDays(today, -2)),
     },
@@ -192,6 +269,12 @@ export function dashboard(ctx: Ctx, u: UserDoc): Dashboard {
     },
     sleepReset: currentSleepReset(ctx, u),
   };
+}
+
+/** Has the person filled in the parts a phone cannot measure? */
+export function answered(log: LogDoc | undefined): boolean {
+  if (!log) return false;
+  return [log.sleepMin, log.steps, log.activeMin, log.mood, log.energy, log.focus, log.stress, log.lateHomework].some((v) => v !== null && v !== undefined);
 }
 
 export interface Achievement {

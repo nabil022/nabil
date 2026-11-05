@@ -7,6 +7,8 @@ import { formatCents } from '../../shared/money';
 import { GROUP_EMOJIS } from '../../shared/profile';
 import type { FeedDoc, StandingRow } from '../../shared/types';
 import { STANDALONE, useApp, useQuery } from '../lib/app';
+import { serverUrl } from '../lib/api';
+import { IS_NATIVE } from '../lib/native';
 import { Link, useRouter } from '../lib/router';
 import { storage } from '../lib/storage';
 import { Icon, type IconName } from '../ui/icons';
@@ -279,6 +281,8 @@ function ago(ts: number): string {
 
 function inviteLink(code: string): string {
   if (STANDALONE) return code;
+  // The Android app runs from https://localhost, so share the server's address instead.
+  if (IS_NATIVE) return serverUrl() ? `${serverUrl()}/#/join/${code}` : code;
   return `${window.location.origin}${window.location.pathname}#/join/${code}`;
 }
 
@@ -311,6 +315,11 @@ function Board({ g, period, meId }: { g: GroupDetail; period: PeriodView; meId: 
                   </Pill>
                 ) : null}
                 {!r.entered && period.kind === 'week' ? <Pill>Not in the pot</Pill> : null}
+                {r.measuredDays ? (
+                  <Pill tone="night" icon="phone">
+                    {r.measuredDays >= r.loggedDays ? 'Auto-tracked' : `${r.measuredDays}/${r.loggedDays} auto`}
+                  </Pill>
+                ) : null}
                 {r.days > 0 && r.loggedDays < r.days ? <span className="tiny">{r.days - r.loggedDays} unlogged</span> : null}
                 {noCheckin && r.userId !== meId ? (
                   <button className="pill pill-night" style={{ border: 0, cursor: 'pointer' }} onClick={() => mutate('POST', `/api/groups/${g.id}/nudge/${r.userId}`, {}, `Nudged ${r.name}`)}>
