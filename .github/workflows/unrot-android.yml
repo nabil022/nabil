@@ -1,6 +1,7 @@
 # Builds the Unrot Android app (unrot/) and proves it runs: tests and
 # typecheck, then the APK, then an Android 14 emulator installs it, grants
-# Usage access, launches it and checks it reads usage data without crashing.
+# Usage access, opens the demo and checks it reads usage data without errors.
+# The APK is kept as a run artifact (download it from the run's page).
 name: Unrot Android
 
 on:
@@ -58,7 +59,22 @@ jobs:
 
       - name: Build the APK
         working-directory: unrot/android
-        run: ./gradlew assembleDebug --no-daemon --stacktrace
+        env:
+          # Optional repository secrets (see unrot/README.md). Without them the
+          # APK is signed with a one-off debug key.
+          UNROT_KEYSTORE_B64: ${{ secrets.UNROT_KEYSTORE_B64 }}
+          UNROT_KEYSTORE_PASSWORD: ${{ secrets.UNROT_KEYSTORE_PASSWORD }}
+          UNROT_KEY_ALIAS: ${{ secrets.UNROT_KEY_ALIAS }}
+          UNROT_KEY_PASSWORD: ${{ secrets.UNROT_KEY_PASSWORD }}
+        run: |
+          if [ -n "$UNROT_KEYSTORE_B64" ]; then
+            echo "$UNROT_KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/unrot.keystore"
+            export UNROT_KEYSTORE_FILE="$RUNNER_TEMP/unrot.keystore"
+            echo "Signing with the repository's private key."
+          else
+            echo "No signing secret set: signing with a one-off debug key."
+          fi
+          ./gradlew assembleDebug --no-daemon --stacktrace
 
       - name: Name the APK
         run: cp android/app/build/outputs/apk/debug/app-debug.apk unrot-android.apk
@@ -70,11 +86,15 @@ jobs:
           if-no-files-found: error
 
   emulator:
-    name: Install and launch on an emulator
+    name: Install and run on an emulator
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: unrot/scripts
+
       - uses: actions/download-artifact@v4
         with:
           name: unrot-android-apk
@@ -94,36 +114,32 @@ jobs:
           profile: pixel_6
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
-          script: |
-            adb install -r unrot-android.apk
-            adb shell appops set app.unrot GET_USAGE_STATS allow
-            adb shell monkey -p com.android.settings -c android.intent.category.LAUNCHER 1 || true
-            sleep 5
-            adb logcat -c
-            adb shell am start -W -n app.unrot/.MainActivity
-            sleep 30
-            adb exec-out screencap -p > launch.png
-            adb logcat -d > logcat.txt
-            adb shell pidof app.unrot > pid.txt || true
+          script: bash unrot/scripts/ci-emulator.sh unrot-android.apk evidence
 
-      - name: Check the app started cleanly
+      - name: Check what happened on the phone
+        working-directory: evidence
         run: |
           echo "--- Unrot and WebView console lines ---"
-          grep -E "\[unrot\]|Capacitor/Console|Capacitor:|AndroidRuntime" logcat.txt | head -120 || true
-          if grep -q "FATAL EXCEPTION" logcat.txt; then
-            echo "::error::The app crashed"; grep -A40 "FATAL EXCEPTION" logcat.txt; exit 1
-          fi
-          if [ ! -s pid.txt ]; then echo "::error::The app is not running after launch"; exit 1; fi
-          if ! grep -q "\[unrot\] usage access: granted=true" logcat.txt; then
-            echo "::error::The app did not report working usage access"; exit 1
-          fi
-          echo "App is running and reads usage data."
+          grep -E "\[unrot\]|Capacitor/Console|AndroidRuntime" logcat.txt | grep -v "Msg: \[object Object\]" | head -80 || true
+          fail=0
+          if grep -q "FATAL EXCEPTION" logcat.txt; then echo "::error::The app crashed"; grep -A40 "FATAL EXCEPTION" logcat.txt; fail=1; fi
+          if [ ! -s pid.txt ]; then echo "::error::The app is not running"; fail=1; fi
+          if grep -E "Capacitor/Console.*(Uncaught|TypeError|ReferenceError)" logcat.txt; then echo "::error::JavaScript errors in the app"; fail=1; fi
+          if ! grep -q "\[unrot\] usage access: granted=true" logcat.txt; then echo "::error::The app did not report working usage access"; fail=1; fi
+          if ! grep -q "Today so far, from your phone" ui-home.xml 2>/dev/null; then echo "::error::The demo home did not show today's measured screen time"; fail=1; fi
+          # Small screenshots, printed so they can be read from the log.
+          for f in 1-welcome 2-demo-home; do
+            if [ -f "$f.png" ] && command -v convert >/dev/null; then
+              convert "$f.png" -resize 360x -quality 60 "$f.jpg"
+              echo "BEGIN-IMG $f"; base64 -w 0 "$f.jpg"; echo; echo "END-IMG $f"
+            fi
+          done
+          if [ "$fail" = 1 ]; then exit 1; fi
+          echo "The app runs, reads usage data and shows it."
 
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: emulator-launch
-          path: |
-            launch.png
-            logcat.txt
+          name: emulator-evidence
+          path: evidence
           if-no-files-found: ignore

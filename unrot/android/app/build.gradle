@@ -7,7 +7,7 @@ android {
         applicationId "app.unrot"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        // CI sets GITHUB_RUN_NUMBER, so every build installs over the last one.
+        // CI sets GITHUB_RUN_NUMBER, so each build has a higher version than the last.
         versionCode((System.getenv('GITHUB_RUN_NUMBER') ?: '1').toInteger())
         versionName "1.1.${System.getenv('GITHUB_RUN_NUMBER') ?: '0'}"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
@@ -17,21 +17,26 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    // A private signing key, if one is provided (CI reads it from repository
+    // secrets). Builds signed with the same key install over each other; without
+    // one, Gradle's one-off debug key is used and updates need an uninstall first.
+    def unrotKeystore = System.getenv('UNROT_KEYSTORE_FILE')
     signingConfigs {
-        // A throwaway key committed on purpose, so test builds from any machine
-        // can be installed over each other. Use a private key for a store release.
-        debug {
-            storeFile file('debug.keystore')
-            storePassword 'android'
-            keyAlias 'androiddebugkey'
-            keyPassword 'android'
+        if (unrotKeystore) {
+            unrot {
+                storeFile file(unrotKeystore)
+                storePassword System.getenv('UNROT_KEYSTORE_PASSWORD')
+                keyAlias System.getenv('UNROT_KEY_ALIAS')
+                keyPassword System.getenv('UNROT_KEY_PASSWORD')
+            }
         }
     }
     buildTypes {
         debug {
-            signingConfig signingConfigs.debug
+            if (unrotKeystore) signingConfig signingConfigs.unrot
         }
         release {
+            if (unrotKeystore) signingConfig signingConfigs.unrot
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }

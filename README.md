@@ -1,6 +1,7 @@
 # Aether
 
-> **Also in this repo: [Unrot](unrot/README.md)**, a brain rot tracker web app
+> **Also in this repo: [Unrot](unrot/README.md)**, a brain rot tracker (an
+> Android app that measures screen time by itself, plus a web app for iPhones)
 > with friend groups, challenges, levels and simulated money. It lives in
 > [`unrot/`](unrot/) and has nothing to do with the game below.
 

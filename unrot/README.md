@@ -2,12 +2,14 @@
 
 **Track your brain rot time, compete with friends to cut it, level up, and put (simulated) money on it.**
 
-An installable web app (PWA) for iPhone and Android. Each morning you log
-yesterday's minutes on the apps that rot your brain, copied from the phone's
-Screen Time / Digital Wellbeing page, plus sleep, steps and a four-question mood
-check. Friend groups compete every week and month for a pot; physical
+An **Android app that measures your screen time by itself**, and the same app
+as an installable web app for iPhones. On Android, Unrot reads your app time
+from the phone (the data behind Digital Wellbeing); on iPhone you copy it from
+Screen Time each morning. Either way you add sleep, steps and a four-question
+mood check. Friend groups compete every week and month for a pot; physical
 challenges take minutes off; deposits make you put money on your goal; a
-one-week Sleep Reset measures sleep before and after a nightly screen cut-off.
+one-week Sleep Reset measures sleep and late-night screen use before and after
+a nightly cut-off.
 
 <p>
 <img src="docs/screenshots/home.png" width="240" alt="Home: this week's brain rot on a dial against your goal and your normal, a seven-day chart, and your groups">
@@ -37,12 +39,14 @@ welcome page also has **Try the demo**, which runs the whole app inside your
 browser with no account.
 
 ```bash
-npm test             # engine, settlement, deposits, server + SQLite persistence (23 tests)
+npm test             # rules, usage maths, settlement, deposits, server + SQLite (38 tests)
 npm run typecheck    # four strict TypeScript projects
 npm run build        # dist/client (the PWA) + dist/server.mjs
 npm start            # production server on :3000, data in ./data/unrot.db
 npm run build:demo   # dist/demo/unrot-demo.html: the app as one self-contained file
 npm run screenshots  # walk every screen in Chromium (needs a server with SEED_DEMO=1)
+npm run build:android                  # web app into the Android project (then Gradle or Android Studio)
+node scripts/android-sim.mjs URL DIR   # the Android flows in Chromium, with a simulated phone
 ```
 
 | Variable | Default | |
@@ -51,6 +55,7 @@ npm run screenshots  # walk every screen in Chromium (needs a server with SEED_D
 | `DATA_DIR` / `DB_FILE` | `./data` / `$DATA_DIR/unrot.db` | Put this on a persistent disk |
 | `TRUST_PROXY` | off | Set `1` behind Render/Fly/Railway so rate limits see real IPs |
 | `SEED_DEMO` | off | Set `1` to start an **empty** database with the demo world |
+| `CORS_ORIGINS` | `https://localhost,capacitor://localhost` | Origins allowed to call the API from elsewhere; the Android app is `https://localhost` |
 
 ## Put it online so your friends can use it
 
@@ -66,6 +71,72 @@ persistent disk works.
 Then open the site on your phone and add it to the home screen (Safari: Share ›
 Add to Home Screen; Chrome: menu › Install app). It works offline for viewing,
 and invite links (`…/#/join/CODE`) open straight into the group.
+
+## The Android app
+
+`android/` is the same app packaged for Android with [Capacitor](https://capacitorjs.com),
+plus one native plugin that reads Android's usage records. Nothing else changes:
+groups, pots, deposits, challenges, health and the Sleep Reset work exactly as
+on the web, and iPhone friends keep using the web app in the same groups.
+
+**Install it**
+
+1. On GitHub, open **Actions › Unrot Android**, pick the latest green run and
+   download **unrot-android-apk** from its Artifacts (you need to be logged in).
+2. Unzip it on the phone and tap `unrot-android.apk`. Android asks you to allow
+   installs from your browser or Files app once.
+3. Open Unrot, enter your server's address (the one from *Put it online*), or
+   tap **Try the demo** to use it without a server.
+4. When the app asks, tap **Turn on tracking**, find Unrot in the list and
+   switch on **Usage access**.
+
+Every push that touches `unrot/` runs that workflow: typecheck, all tests, the
+APK build, and an Android 14 emulator that installs the APK, grants Usage
+access, opens the demo and fails the run on a crash, a JavaScript error, or if
+the app can't read usage data.
+
+**Updates install over the old app only if every build is signed with the
+same key.** Without a key, CI signs each build with a one-off debug key and you
+uninstall before installing the next one. To set a key up once:
+
+```bash
+keytool -genkeypair -keystore unrot.keystore -alias unrot -keyalg RSA -keysize 2048 -validity 10000
+base64 -w 0 unrot.keystore   # copy the output
+```
+
+Then add four repository secrets (Settings › Secrets and variables › Actions):
+`UNROT_KEYSTORE_B64` (that output), `UNROT_KEYSTORE_PASSWORD`, `UNROT_KEY_ALIAS`
+(`unrot`) and `UNROT_KEY_PASSWORD`. Keep the keystore file somewhere safe and
+never commit it: anyone with the key can publish "updates" to your app.
+
+**Building it yourself** needs JDK 21 and the Android SDK (Android Studio
+installs both): `npm run build:android`, then open `android/` in Android Studio
+and press Run, or `cd android && ./gradlew assembleDebug`.
+
+**How the tracking works**
+
+- The plugin (`android/app/src/main/java/app/unrot/UsageStatsPlugin.java`) only
+  checks access, opens the Usage access screen, and returns raw usage events
+  and app names. All the maths is in `src/shared/usage.ts`, with tests:
+  sessions from "app opened / paused / screen off" events, split at midnight in
+  your time zone, and phone time after your cut-off until 05:00.
+- TikTok, Instagram, YouTube, Snapchat, X, Reddit, Facebook, Twitch, Discord and
+  the big streaming apps (including Shahid) are recognised by package name;
+  games by their Play Store category. In **Settings › Phone tracking** you can
+  pick any other app to count as *Other apps*.
+- Each time the app opens or comes back to the front it saves **yesterday**
+  (finished days only, so live leaderboards never see half a day) and shows
+  **today so far**. Open it at least once a day: days can only be saved for
+  today and yesterday, the same rule as typed check-ins.
+- **Measured numbers can't be edited.** A check-in can add sleep, steps and mood
+  but not change the phone's minutes, and group leaderboards mark players whose
+  days were measured as *Auto-tracked*.
+- Onboarding can fill in *your normal* from last week's real usage.
+- Optional reminders (morning check-in, nightly cut-off) are scheduled on the
+  phone in Settings.
+- **Privacy:** only each day's totals for the apps you track, and the minutes
+  after your cut-off, leave the phone. Which other apps you use, and the extra
+  apps you pick, stay on the phone.
 
 ## How it works
 
@@ -158,12 +229,11 @@ and warns you when something won't fit before it is due.
 
 ## Choices worth knowing about
 
-- **Screen time is entered, not read automatically.** A web app cannot read
-  other apps' usage on any phone. iPhone only exposes it to apps with Apple's
-  Family Controls entitlement, and even then not as plain numbers; Android
-  allows it to native apps with Usage Access. The check-in is built to take
-  about 30 seconds, and an Android companion that fills it in is the natural
-  next step.
+- **Automatic on Android, typed on iPhone.** A web app cannot read other
+  apps' usage on any phone, so automatic tracking is the Android app's job.
+  iPhone only exposes usage to apps with Apple's Family Controls entitlement,
+  and even then not as plain numbers, so iPhone users copy it from Screen Time
+  (about 30 seconds a day). Mixed groups work: measured players are marked.
 - **Steps count above your usual, not from zero.** Taken literally, 15 minutes
   per 1,000 steps means an ordinary 8,000-step day erases 2 hours, and in
   testing every member of a group "cut" 50-70% without changing their
@@ -198,9 +268,13 @@ src/server/    node:http + node:sqlite persistence, scrypt passwords,
                rate limits, security headers, static hosting
 src/client/    React PWA; talks to the server, or in demo mode runs the same
                engine in the browser with localStorage
-tests/         Vitest: engine scenarios, the demo world in 4 time zones, the
-               HTTP server with SQLite restarts
-scripts/       server bundle, standalone demo, icons, screenshot walkthrough
+  lib/native.ts, lib/tracking*.ts   the Android side: plugin, sync, reminders
+src/shared/usage.ts   Android usage events -> minutes per app per day
+android/       the Capacitor Android project and the UsageStats plugin
+tests/         Vitest: engine scenarios, Android usage maths, the demo world
+               in 4 time zones, the HTTP server with SQLite restarts
+scripts/       server bundle, standalone demo, icons (web and Android),
+               screenshot walkthrough, Android simulation, CI emulator script
 ```
 
 The engine keeps all data in memory and writes only what each request changed
