@@ -1,0 +1,35 @@
+{
+  "name": "unrot",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Unrot: track your brain rot time, challenge friends, level up, and put (simulated) money on cutting it down.",
+  "type": "module",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "dev": "tsx watch --clear-screen=false src/server/index.ts --dev",
+    "build": "vite build && node scripts/build-server.mjs",
+    "start": "node --disable-warning=ExperimentalWarning dist/server.mjs",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.core.json && tsc -p tsconfig.server.json && tsc -p tsconfig.client.json && tsc -p tsconfig.tests.json",
+    "build:demo": "node scripts/build-demo.mjs",
+    "icons": "node scripts/make-icons.mjs",
+    "screenshots": "node scripts/screenshots.mjs"
+  },
+  "dependencies": {
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.5",
+    "@types/react": "18.3.31",
+    "@types/react-dom": "18.3.7",
+    "@vitejs/plugin-react": "5.2.0",
+    "esbuild": "0.28.1",
+    "tsx": "4.23.13",
+    "typescript": "5.9.3",
+    "vite": "7.3.7",
+    "vitest": "3.2.7"
+  }
+}

@@ -1,5 +1,9 @@
 # Aether
 
+> **Also in this repo: [Unrot](unrot/README.md)**, a brain rot tracker web app
+> with friend groups, challenges, levels and simulated money. It lives in
+> [`unrot/`](unrot/) and has nothing to do with the game below.
+
 An idle / incremental collection game. You pull **Fragments** — abstract
 geometric sigils — out of the Aether. Fragments generate **Flux**, Flux buys
 **Rifts**, Rifts contain more Fragments. Duplicates become **Shards**, which
