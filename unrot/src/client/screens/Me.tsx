@@ -10,6 +10,7 @@ import { AGE_GROUPS, type AgeGroup } from '../../shared/health';
 import { formatCents } from '../../shared/money';
 import { AVATARS, AVATAR_COLORS } from '../../shared/profile';
 import { STANDALONE, useApp, useQuery, type Theme } from '../lib/app';
+import { downloadText } from '../lib/download';
 import { Link, useRouter } from '../lib/router';
 import { DayBars, HBars } from '../ui/charts';
 import { BrainMark, Icon, type IconName } from '../ui/icons';
@@ -115,16 +116,7 @@ export function Settings() {
         [l.date, ...apps.map((a) => l.apps[a] ?? ''), l.steps ?? '', l.activeMin ?? '', l.bedtime ?? '', l.wakeTime ?? '', l.sleepMin ?? '', l.lateNightMin ?? '', l.mood ?? '', l.energy ?? '', l.focus ?? '', l.stress ?? '', l.lateHomework === null ? '' : l.lateHomework ? 'yes' : 'no'].join(','),
       );
       const csv = [head.join(','), ...rows].join('\n');
-      if (STANDALONE) {
-        setExportText(csv);
-        return;
-      }
-      const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `unrot-${me.today}.csv`;
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      if (STANDALONE || !downloadText(`unrot-${me.today}.csv`, csv)) setExportText(csv);
     } catch (err) {
       toast(err instanceof Error ? err.message : 'Export failed.', 'bad');
     }

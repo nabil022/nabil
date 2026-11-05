@@ -13,6 +13,7 @@ import { build } from 'vite';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const shim = fileURLToPath(new URL('../src/client/demo/jsx-runtime.ts', import.meta.url));
+const noDownload = fileURLToPath(new URL('../src/client/demo/download.ts', import.meta.url));
 const outBuild = `${root}dist/demo-build`;
 const outDir = `${root}dist/demo`;
 
@@ -32,6 +33,7 @@ await build({
     alias: [
       { find: /^react\/jsx-runtime$/, replacement: shim },
       { find: /^react\/jsx-dev-runtime$/, replacement: shim },
+      { find: /^\.\.\/lib\/download$/, replacement: noDownload },
     ],
   },
   build: {
