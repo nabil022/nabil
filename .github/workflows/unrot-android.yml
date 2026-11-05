@@ -126,10 +126,14 @@ jobs:
           if [ ! -s pid.txt ]; then echo "::error::The app is not running"; fail=1; fi
           if grep -E "Capacitor/Console.*(Uncaught|TypeError|ReferenceError)" logcat.txt; then echo "::error::JavaScript errors in the app"; fail=1; fi
           if ! grep -q "\[unrot\] usage access: granted=true" logcat.txt; then echo "::error::The app did not report working usage access"; fail=1; fi
-          if ! grep -q "Today so far, from your phone" ui-home.xml 2>/dev/null; then echo "::error::The demo home did not show today's measured screen time"; fail=1; fi
+          echo "--- Text on the demo home screen ---"
+          python3 -c "import re,sys; print(' | '.join(t for t in re.findall(r' text=\"([^\"]+)\"', open('ui-home.xml').read()) if t.strip())[:2000])" 2>/dev/null || echo "(no screen dump)"
+          # Headings are styled in capitals, which Android reports as rendered: match any case.
+          if ! grep -qi "today so far, from your phone" ui-home.xml 2>/dev/null; then echo "::error::The demo home did not show today's measured screen time"; fail=1; fi
           # Small screenshots, printed so they can be read from the log.
+          python3 -m pip install --quiet --disable-pip-version-check pillow >/dev/null 2>&1 || true
           for f in 1-welcome 2-demo-home; do
-            if [ -f "$f.png" ] && ffmpeg -loglevel error -y -i "$f.png" -vf scale=360:-1 -q:v 9 "$f.jpg"; then
+            if [ -f "$f.png" ] && python3 -c "from PIL import Image; im=Image.open('$f.png').convert('RGB'); im.thumbnail((360, 800)); im.save('$f.jpg', quality=55)" 2>/dev/null; then
               echo "BEGIN-IMG $f"; base64 -w 0 "$f.jpg"; echo; echo "END-IMG $f"
             fi
           done
