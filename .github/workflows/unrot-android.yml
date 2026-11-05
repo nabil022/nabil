@@ -1,7 +1,8 @@
 # Builds the Unrot Android app (unrot/) and proves it runs: tests and
 # typecheck, then the APK, then an Android 14 emulator installs it, grants
 # Usage access, opens the demo and checks it reads usage data without errors.
-# The APK is kept as a run artifact (download it from the run's page).
+# The APK is kept on the run's page as a plain .apk (not a zip), so a phone
+# can open the download straight into the installer.
 name: Unrot Android
 
 on:
@@ -77,12 +78,15 @@ jobs:
           ./gradlew assembleDebug --no-daemon --stacktrace
 
       - name: Name the APK
-        run: cp android/app/build/outputs/apk/debug/app-debug.apk unrot-android.apk
+        run: |
+          cp android/app/build/outputs/apk/debug/app-debug.apk unrot-android.apk
+          ls -l unrot-android.apk
 
-      - uses: actions/upload-artifact@v4
+      # archive: false uploads the bare file; the artifact takes its name.
+      - uses: actions/upload-artifact@v7
         with:
-          name: unrot-android-apk
           path: unrot/unrot-android.apk
+          archive: false
           if-no-files-found: error
 
   emulator:
@@ -95,9 +99,16 @@ jobs:
         with:
           sparse-checkout: unrot/scripts
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
-          name: unrot-android-apk
+          name: unrot-android.apk
+
+      - name: Find the APK
+        run: |
+          apk=$(find . -name '*.apk' | head -1)
+          if [ -z "$apk" ]; then echo "::error::No APK was downloaded"; ls -laR; exit 1; fi
+          [ "$apk" = ./unrot-android.apk ] || mv "$apk" unrot-android.apk
+          ls -l unrot-android.apk
 
       - name: Enable KVM
         run: |
@@ -140,7 +151,7 @@ jobs:
           if [ "$fail" = 1 ]; then exit 1; fi
           echo "The app runs, reads usage data and shows it."
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: emulator-evidence

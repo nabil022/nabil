@@ -81,10 +81,12 @@ on the web, and iPhone friends keep using the web app in the same groups.
 
 **Install it**
 
-1. On GitHub, open **Actions › Unrot Android**, pick the latest green run and
-   download **unrot-android-apk** from its Artifacts (you need to be logged in).
-2. Unzip it on the phone and tap `unrot-android.apk`. Android asks you to allow
-   installs from your browser or Files app once.
+1. On the phone, open GitHub in the browser and log in, then open
+   **Actions › Unrot Android**, pick the latest green run and tap
+   **unrot-android.apk** under its Artifacts. It downloads as the app itself.
+2. Open the download. Android asks you once to allow installs from your
+   browser, and may warn about installing an app from outside the Play Store:
+   choose to install anyway.
 3. Open Unrot, enter your server's address (the one from *Put it online*), or
    tap **Try the demo** to use it without a server.
 4. When the app asks, tap **Turn on tracking**, find Unrot in the list and
