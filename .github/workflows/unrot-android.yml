@@ -129,8 +129,7 @@ jobs:
           if ! grep -q "Today so far, from your phone" ui-home.xml 2>/dev/null; then echo "::error::The demo home did not show today's measured screen time"; fail=1; fi
           # Small screenshots, printed so they can be read from the log.
           for f in 1-welcome 2-demo-home; do
-            if [ -f "$f.png" ] && command -v convert >/dev/null; then
-              convert "$f.png" -resize 360x -quality 60 "$f.jpg"
+            if [ -f "$f.png" ] && ffmpeg -loglevel error -y -i "$f.png" -vf scale=360:-1 -q:v 9 "$f.jpg"; then
               echo "BEGIN-IMG $f"; base64 -w 0 "$f.jpg"; echo; echo "END-IMG $f"
             fi
           done

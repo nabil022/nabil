@@ -54,6 +54,9 @@ PY
 
 if tap_text "Try the demo first"; then
   sleep 15
+  # The app should open the demo at the top; swipe down anyway so the dump sees it.
+  adb shell input swipe 540 700 540 1900 200
+  sleep 2
   adb exec-out screencap -p > "$OUT/2-demo-home.png"
   adb shell uiautomator dump /sdcard/home.xml >/dev/null 2>&1
   adb pull /sdcard/home.xml "$OUT/ui-home.xml" >/dev/null 2>&1

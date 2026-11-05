@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useEffect, type ReactNode } from 'react';
 import { STANDALONE, useApp } from './lib/app';
 import { Link, match, useRouter } from './lib/router';
 import { Challenges } from './screens/Challenges';
@@ -105,8 +105,13 @@ function DemoBar() {
 }
 
 export function App() {
-  const { ready, me } = useApp();
+  const { ready, me, api } = useApp();
   const { path } = useRouter();
+
+  // Signing in, out, or into the demo replaces the whole screen: start at the top.
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [me?.id, api]);
 
   if (!ready) {
     return (
