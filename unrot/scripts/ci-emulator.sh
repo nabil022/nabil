@@ -13,24 +13,53 @@ mkdir -p "$OUT"
 
 adb install -r "$APK"
 adb shell appops set app.unrot GET_USAGE_STATS allow
+# A slow CI emulator often shows "Pixel Launcher isn't responding" over the app.
+# Ask Android not to; dump_ui below answers any that still appear with Wait.
+adb shell settings put global hide_error_dialogs 1 >/dev/null 2>&1 || true
+adb shell settings put secure anr_show_background 0 >/dev/null 2>&1 || true
 # Some phone use to read back: open Settings for a moment.
 adb shell monkey -p com.android.settings -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1 || true
 sleep 5
 adb shell dumpsys webviewupdate 2>/dev/null | grep -iE "current webview package|version" | head -3 || true
+# Dump what is on screen to $OUT/ui-search.xml (or $1), first answering any
+# "isn't responding" dialog: Close app for a slow system app, Wait for Unrot.
+dump_ui() {
+  local file="${1:-$OUT/ui-search.xml}"
+  for _ in 1 2 3 4; do
+    adb shell uiautomator dump /sdcard/ui.xml >/dev/null 2>&1
+    adb pull /sdcard/ui.xml "$file" >/dev/null 2>&1
+    grep -q "t responding" "$file" 2>/dev/null || return 0
+    local wait
+    wait=$(python3 - "$file" <<'PY'
+import re, sys, xml.etree.ElementTree as ET
+nodes = list(ET.parse(sys.argv[1]).getroot().iter('node'))
+ours = any('Unrot' in (n.get('text') or '') and 'responding' in (n.get('text') or '') for n in nodes)
+answer = 'wait' if ours else 'close app'
+for n in nodes:
+    if (n.get('text') or '').strip().lower() == answer:
+        b = [int(v) for v in re.findall(r'-?\d+', n.get('bounds', ''))]
+        print((b[0] + b[2]) // 2, (b[1] + b[3]) // 2)
+        break
+PY
+)
+    echo "Answering an \"isn't responding\" dialog on screen"
+    if [ -n "$wait" ]; then adb shell input tap $wait; else adb shell input keyevent 4; fi
+    sleep 3
+  done
+}
+
 adb logcat -c
 adb shell am start -W -n app.unrot/.MainActivity
 sleep 20
+dump_ui "$OUT/ui-setup.xml"
 adb exec-out screencap -p > "$OUT/1-setup.png"
-adb shell uiautomator dump /sdcard/setup.xml >/dev/null 2>&1
-adb pull /sdcard/setup.xml "$OUT/ui-setup.xml" >/dev/null 2>&1
 
 # Tap the first element on screen whose text contains $1, scrolling down to find it.
 # "=Text" matches the whole text (or description) instead, ignoring case.
 tap_text() {
   local text="$1"
   for _ in 1 2 3 4 5 6 7 8; do
-    adb shell uiautomator dump /sdcard/ui.xml >/dev/null 2>&1
-    adb pull /sdcard/ui.xml "$OUT/ui-search.xml" >/dev/null 2>&1
+    dump_ui
     local point
     point=$(python3 - "$OUT/ui-search.xml" "$text" <<'PY'
 import re, sys, xml.etree.ElementTree as ET
@@ -67,8 +96,7 @@ PY
 
 # True if text $1 is anywhere on screen (any case: some headings render in capitals).
 see_text() {
-  adb shell uiautomator dump /sdcard/ui.xml >/dev/null 2>&1
-  adb pull /sdcard/ui.xml "$OUT/ui-search.xml" >/dev/null 2>&1
+  dump_ui
   grep -qiF "$1" "$OUT/ui-search.xml"
 }
 
@@ -162,13 +190,11 @@ if set_up; then
   # Home should open at the top; swipe down anyway so the dump sees it.
   adb shell input swipe 540 700 540 1900 200
   sleep 2
+  dump_ui "$OUT/ui-home.xml"
   adb exec-out screencap -p > "$OUT/2-home.png"
-  adb shell uiautomator dump /sdcard/home.xml >/dev/null 2>&1
-  adb pull /sdcard/home.xml "$OUT/ui-home.xml" >/dev/null 2>&1
   if backup_round_trip; then
+    dump_ui "$OUT/ui-restored.xml"
     adb exec-out screencap -p > "$OUT/5-restored.png"
-    adb shell uiautomator dump /sdcard/restored.xml >/dev/null 2>&1
-    adb pull /sdcard/restored.xml "$OUT/ui-restored.xml" >/dev/null 2>&1
   else
     adb exec-out screencap -p > "$OUT/5-stuck.png"
   fi
