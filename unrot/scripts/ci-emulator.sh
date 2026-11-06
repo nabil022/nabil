@@ -30,9 +30,11 @@ dump_ui() {
     # clean each time so a failed one is retried, not read stale.
     : > "$file"
     adb shell rm -f /sdcard/ui.xml >/dev/null 2>&1
-    adb shell uiautomator dump /sdcard/ui.xml >/dev/null 2>&1
+    local said
+    said=$(adb shell uiautomator dump /sdcard/ui.xml 2>&1)
     adb pull /sdcard/ui.xml "$file" >/dev/null 2>&1
     if ! grep -q "<hierarchy" "$file" 2>/dev/null; then
+      echo "Screen dump failed, retrying: $said" >&2
       sleep 2
       continue
     fi
@@ -65,10 +67,11 @@ adb exec-out screencap -p > "$OUT/1-setup.png"
 # Tap the first element on screen whose text contains $1, scrolling down to find it.
 # Visible text wins over descriptions (in the file picker, the file's name opens
 # it, while the description sits on its select circle). "=Text" matches the
-# whole text or description instead, ignoring case.
+# whole text or description instead, ignoring case. In the app, anything near
+# the bottom may sit under the tab bar, so it is scrolled up first.
 tap_text() {
-  local text="$1"
-  for _ in 1 2 3 4 5 6 7 8; do
+  local text="$1" last=""
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
     dump_ui
     local point
     point=$(python3 - "$OUT/ui-search.xml" "$text" <<'PY'
@@ -87,15 +90,25 @@ def on_screen(n):
     return b if len(b) == 4 and b[3] > b[1] and b[1] >= 0 and b[3] <= 2400 else None
 nodes = list(root.iter('node'))
 for attr in ('text', 'content-desc'):
-    found = next((b for n in nodes if hit(n.get(attr)) and (b := on_screen(n))), None)
+    found = next(((b, n.get('package') or '') for n in nodes if hit(n.get(attr)) and (b := on_screen(n))), None)
     if found:
-        print((found[0] + found[2]) // 2, (found[1] + found[3]) // 2)
+        (b, package) = found
+        print((b[0] + b[2]) // 2, (b[1] + b[3]) // 2, package)
         break
 PY
 )
     if [ -n "$point" ]; then
-      echo "Tapping \"$text\" at $point"
-      adb shell input tap $point
+      local x y package
+      read -r x y package <<< "$point"
+      # Unless it can't move any further (then nothing covers it).
+      if [ "$package" = "app.unrot" ] && [ "$y" -gt 1950 ] && [ "$y" != "$last" ]; then
+        last="$y"
+        adb shell input swipe 540 1500 540 900 800
+        sleep 1
+        continue
+      fi
+      echo "Tapping \"$text\" at $x $y"
+      adb shell input tap "$x" "$y"
       return 0
     fi
     adb shell input swipe 540 1800 540 700 300
@@ -120,6 +133,8 @@ hide_keyboard() {
 }
 
 set_up() {
+  # Keep a dump of the first screen for the checks, if the one at launch failed.
+  grep -q "<hierarchy" "$OUT/ui-setup.xml" 2>/dev/null || { see_text "Welcome to" && cp "$OUT/ui-search.xml" "$OUT/ui-setup.xml"; }
   # 1 of 5: about you. Enter in the year field submits the form.
   tap_text "First name" || return 1
   sleep 1
