@@ -25,9 +25,17 @@ adb shell dumpsys webviewupdate 2>/dev/null | grep -iE "current webview package|
 # "isn't responding" dialog: Close app for a slow system app, Wait for Unrot.
 dump_ui() {
   local file="${1:-$OUT/ui-search.xml}"
-  for _ in 1 2 3 4; do
+  for _ in 1 2 3 4 5 6; do
+    # A dump fails ("could not get idle state") while the screen is busy: start
+    # clean each time so a failed one is retried, not read stale.
+    : > "$file"
+    adb shell rm -f /sdcard/ui.xml >/dev/null 2>&1
     adb shell uiautomator dump /sdcard/ui.xml >/dev/null 2>&1
     adb pull /sdcard/ui.xml "$file" >/dev/null 2>&1
+    if ! grep -q "<hierarchy" "$file" 2>/dev/null; then
+      sleep 2
+      continue
+    fi
     grep -q "t responding" "$file" 2>/dev/null || return 0
     local wait
     wait=$(python3 - "$file" <<'PY'
@@ -55,7 +63,9 @@ dump_ui "$OUT/ui-setup.xml"
 adb exec-out screencap -p > "$OUT/1-setup.png"
 
 # Tap the first element on screen whose text contains $1, scrolling down to find it.
-# "=Text" matches the whole text (or description) instead, ignoring case.
+# Visible text wins over descriptions (in the file picker, the file's name opens
+# it, while the description sits on its select circle). "=Text" matches the
+# whole text or description instead, ignoring case.
 tap_text() {
   local text="$1"
   for _ in 1 2 3 4 5 6 7 8; do
@@ -69,17 +79,18 @@ except Exception:
     sys.exit(0)
 want = sys.argv[2]
 exact = want.startswith('=')
-for n in root.iter('node'):
-    text, desc = (n.get('text') or '').strip(), (n.get('content-desc') or '').strip()
-    if exact:
-        hit = want[1:].lower() in (text.lower(), desc.lower())
-    else:
-        hit = want in text + ' ' + desc
-    if hit:
-        b = [int(v) for v in re.findall(r'-?\d+', n.get('bounds', ''))]
-        if len(b) == 4 and b[3] > b[1] and b[1] >= 0 and b[3] <= 2400:
-            print((b[0] + b[2]) // 2, (b[1] + b[3]) // 2)
-            break
+def hit(value):
+    value = (value or '').strip()
+    return value.lower() == want[1:].lower() if exact else want in value
+def on_screen(n):
+    b = [int(v) for v in re.findall(r'-?\d+', n.get('bounds', ''))]
+    return b if len(b) == 4 and b[3] > b[1] and b[1] >= 0 and b[3] <= 2400 else None
+nodes = list(root.iter('node'))
+for attr in ('text', 'content-desc'):
+    found = next((b for n in nodes if hit(n.get(attr)) and (b := on_screen(n))), None)
+    if found:
+        print((found[0] + found[2]) // 2, (found[1] + found[3]) // 2)
+        break
 PY
 )
     if [ -n "$point" ]; then
