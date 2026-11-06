@@ -11,6 +11,7 @@ import { useState } from 'react';
 import { RotMeter, WeekBars, type WeekPoint } from '../ui/charts';
 import { Icon } from '../ui/icons';
 import { Button, Card, ErrorNote, Loading, Meter, Pill, Screen, Section } from '../ui/kit';
+import { BackupNudge } from './Backup';
 
 function greeting(nowMin: number): string {
   if (nowMin < 5 * 60) return 'Still up';
@@ -241,7 +242,9 @@ export function Home() {
             ))}
           </div>
         </Section>
-      ) : api.mode === 'phone' ? null : (
+      ) : api.mode === 'phone' ? (
+        me ? <BackupNudge me={me} /> : null
+      ) : (
         <Card tone="brand" onClick={() => go('/groups')}>
           <div className="row">
             <Icon name="groups" size={26} />

@@ -1,6 +1,7 @@
 import { useEffect, type ReactNode } from 'react';
 import { STANDALONE, useApp } from './lib/app';
 import { Link, match, useRouter } from './lib/router';
+import { BackupScreen } from './screens/Backup';
 import { Challenges } from './screens/Challenges';
 import { CheckIn } from './screens/CheckIn';
 import { DepositNew, Wallet } from './screens/Wallet';
@@ -38,6 +39,7 @@ const ROUTES: [string, View][] = [
   ['/me', () => <MeScreen />],
   ['/settings', () => <Settings />],
   ['/settings/baseline', (_p, q) => <BaselineScreen then={q.get('then') ?? undefined} />],
+  ['/backup', () => <BackupScreen />],
   ['/about', () => <About />],
   ['/calculator', () => <CalculatorScreen />],
 ];
@@ -65,7 +67,7 @@ const TABS: { to: string; label: string; icon: IconName; match: (p: string) => b
   { to: '/', label: 'Home', icon: 'home', match: (p) => p === '/' || p.startsWith('/health') || p.startsWith('/sleep') || p.startsWith('/planner') },
   { to: '/groups', label: 'Groups', icon: 'groups', match: (p) => p.startsWith('/groups') || p.startsWith('/leaderboard') || p.startsWith('/join') },
   { to: '/challenges', label: 'Challenges', icon: 'bolt', match: (p) => p.startsWith('/challenges') },
-  { to: '/me', label: 'You', icon: 'user', match: (p) => ['/me', '/settings', '/wallet', '/deposit', '/stats', '/about', '/calculator'].some((x) => p.startsWith(x)) },
+  { to: '/me', label: 'You', icon: 'user', match: (p) => ['/me', '/settings', '/backup', '/wallet', '/deposit', '/stats', '/about', '/calculator'].some((x) => p.startsWith(x)) },
 ];
 
 function TabBar() {

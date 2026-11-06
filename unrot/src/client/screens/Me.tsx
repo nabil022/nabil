@@ -279,6 +279,9 @@ export function Settings() {
             {api.mode === 'phone' ? (
               <>
                 <p className="small muted">Everything you enter is saved on this phone, and only here.</p>
+                <Link to="/backup" className="btn btn-secondary btn-md">
+                  <Icon name="download" size={18} /> Backup and restore
+                </Link>
                 <Button variant="quiet" icon="trash" onClick={() => setErasing(true)}>
                   Erase everything on this phone
                 </Button>

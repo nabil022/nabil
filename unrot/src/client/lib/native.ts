@@ -1,5 +1,5 @@
-// The Android app's native side: the UsageStats plugin (src: android/app/
-// src/main/java/app/unrot/UsageStatsPlugin.java), reminders, and app state.
+// The Android app's native side: the UsageStats and Backup plugins (src:
+// android/app/src/main/java/app/unrot/), reminders, and app state.
 //
 // Tests and screenshots run in a normal browser by injecting
 // window.__UNROT_FAKE_NATIVE__ before the app loads; the app then behaves as
@@ -15,10 +15,20 @@ export interface UsageStatsPlugin {
   appInfo(options: { packages: string[] }): Promise<Record<string, PackageInfo>>;
 }
 
+/** Android's own save and open file screens (Google Drive included). */
+export interface BackupPlugin {
+  /** Resolves once the file is written, or with saved: false if the person backed out. */
+  save(options: { name: string; data: string }): Promise<{ saved: boolean; name?: string }>;
+  /** Resolves with the chosen file's text, or with opened: false if the person backed out. */
+  open(): Promise<{ opened: boolean; name?: string; data?: string }>;
+}
+
 export interface FakeNative {
   granted: boolean;
   events: EventBatch;
   info: Record<string, PackageInfo>;
+  /** Files "saved" through the fake Backup plugin, by name; open() returns the last one. */
+  files?: Record<string, string>;
 }
 
 declare global {
@@ -57,6 +67,21 @@ function fakePlugin(f: FakeNative): UsageStatsPlugin {
 }
 
 export const UsageStats: UsageStatsPlugin = fake ? fakePlugin(fake) : registerPlugin<UsageStatsPlugin>('UsageStats');
+
+function fakeBackup(f: FakeNative): BackupPlugin {
+  return {
+    async save({ name, data }) {
+      f.files = { ...f.files, [name]: data };
+      return { saved: true, name };
+    },
+    async open() {
+      const name = Object.keys(f.files ?? {}).pop();
+      return name ? { opened: true, name, data: f.files![name] } : { opened: false };
+    },
+  };
+}
+
+export const Backup: BackupPlugin = fake ? fakeBackup(fake) : registerPlugin<BackupPlugin>('Backup');
 
 /** Calls `fn` whenever the app comes back to the foreground. Returns an unsubscribe function. */
 export function onResume(fn: () => void): () => void {

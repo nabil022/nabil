@@ -5,19 +5,12 @@
 
 import { Engine, Store, type EngineCrypto } from '../../engine';
 import { seedDemo } from '../../engine/seed';
-import type { CollectionName, Doc } from '../../shared/types';
-import { ApiError, type Api } from './api';
+import { ApiError, type Api, type SavedWorld } from './api';
 import { storage } from './storage';
 
 export type LocalKind = 'demo' | 'phone';
 
 export const LOCAL_KEYS: Record<LocalKind, string> = { demo: 'unrot.demo.v1', phone: 'unrot.phone.v1' };
-
-interface Saved {
-  version: 1;
-  token: string | null;
-  data: Record<CollectionName, Doc[]>;
-}
 
 function randomHex(bytes: number): string {
   const buf = new Uint8Array(bytes);
@@ -60,14 +53,18 @@ interface World {
   token: string | null;
 }
 
+function fromSaved(saved: SavedWorld, localProfiles: boolean): World {
+  const store = new Store();
+  store.load(saved.data);
+  return { engine: new Engine({ store, crypto: deviceCrypto, localProfiles }), store, token: saved.token };
+}
+
 function build(kind: LocalKind): World {
   const localProfiles = kind === 'phone';
-  const saved = storage.getJSON<Saved>(LOCAL_KEYS[kind]);
+  const saved = storage.getJSON<SavedWorld>(LOCAL_KEYS[kind]);
   if (saved?.version === 1 && saved.data) {
     try {
-      const store = new Store();
-      store.load(saved.data);
-      return { engine: new Engine({ store, crypto: deviceCrypto, localProfiles }), store, token: saved.token };
+      return fromSaved(saved, localProfiles);
     } catch {
       // Corrupt save: fall through to a fresh world.
     }
@@ -84,10 +81,11 @@ export function localApi(kind: LocalKind = 'demo'): Api {
   let world = build(kind);
   let timer: ReturnType<typeof setTimeout> | null = null;
 
+  const snapshot = (): SavedWorld => ({ version: 1, token: world.token, data: world.store.snapshot() });
   const write = () => {
     if (timer) clearTimeout(timer);
     timer = null;
-    storage.setJSON(LOCAL_KEYS[kind], { version: 1, token: world.token, data: world.store.snapshot() } satisfies Saved);
+    storage.setJSON(LOCAL_KEYS[kind], snapshot());
   };
   const save = () => {
     if (timer) clearTimeout(timer);
@@ -135,6 +133,11 @@ export function localApi(kind: LocalKind = 'demo'): Api {
       storage.set(LOCAL_KEYS[kind], null);
       world = build(kind);
       if (kind === 'demo') write();
+    },
+    snapshot,
+    restore(saved) {
+      world = fromSaved(saved, kind === 'phone');
+      write();
     },
   };
 }

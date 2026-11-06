@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Runs in CI against an Android emulator: install the APK, grant Usage access,
 # launch, set up a profile the way a person would (name, birth year, routine,
-# apps, normal week, goals), and save evidence (screenshots, UI dumps, logcat).
+# apps, normal week, goals), then save a backup through Android's save screen,
+# erase everything and restore it through Android's file picker. Saves
+# evidence (screenshots, UI dumps, logcat).
 #
 #   bash unrot/scripts/ci-emulator.sh path/to/unrot-android.apk evidence-dir
 set -u
@@ -23,6 +25,7 @@ adb shell uiautomator dump /sdcard/setup.xml >/dev/null 2>&1
 adb pull /sdcard/setup.xml "$OUT/ui-setup.xml" >/dev/null 2>&1
 
 # Tap the first element on screen whose text contains $1, scrolling down to find it.
+# "=Text" matches the whole text (or description) instead, ignoring case.
 tap_text() {
   local text="$1"
   for _ in 1 2 3 4 5 6 7 8; do
@@ -35,9 +38,15 @@ try:
     root = ET.parse(sys.argv[1]).getroot()
 except Exception:
     sys.exit(0)
+want = sys.argv[2]
+exact = want.startswith('=')
 for n in root.iter('node'):
-    label = (n.get('text') or '') + ' ' + (n.get('content-desc') or '')
-    if sys.argv[2] in label:
+    text, desc = (n.get('text') or '').strip(), (n.get('content-desc') or '').strip()
+    if exact:
+        hit = want[1:].lower() in (text.lower(), desc.lower())
+    else:
+        hit = want in text + ' ' + desc
+    if hit:
         b = [int(v) for v in re.findall(r'-?\d+', n.get('bounds', ''))]
         if len(b) == 4 and b[3] > b[1] and b[1] >= 0 and b[3] <= 2400:
             print((b[0] + b[2]) // 2, (b[1] + b[3]) // 2)
@@ -106,6 +115,49 @@ set_up() {
   sleep 12
 }
 
+# Android's save screen (DocumentsUI): save where it opens, or in Downloads.
+save_in_picker() {
+  sleep 4
+  adb exec-out screencap -p > "$OUT/3-save-screen.png"
+  tap_text "=save" && sleep 4
+  if ! see_text "Last backup:"; then
+    tap_text "=Show roots" && sleep 2 && tap_text "=Downloads" && sleep 3 && tap_text "=save" && sleep 4
+  fi
+  see_text "Last backup:"
+}
+
+# Android's file picker: choose the backup, from Recent or from Downloads.
+open_in_picker() {
+  sleep 4
+  adb exec-out screencap -p > "$OUT/4-open-screen.png"
+  if ! tap_text "unrot-backup"; then
+    tap_text "=Show roots" && sleep 2 && tap_text "=Downloads" && sleep 3 && tap_text "unrot-backup" || return 1
+  fi
+  sleep 4
+}
+
+backup_round_trip() {
+  tap_text "=You" || return 1
+  sleep 2
+  tap_text "=Settings" || return 1
+  sleep 2
+  tap_text "Backup and restore" || return 1
+  sleep 2
+  tap_text "Save a backup" || return 1
+  save_in_picker || { echo "The backup was not saved" >&2; return 1; }
+  tap_text "=Back" || return 1
+  sleep 2
+  tap_text "Erase everything on this phone" || return 1
+  sleep 2
+  tap_text "Erase for good" || return 1
+  sleep 4
+  see_text "Welcome to" || { echo "Erasing did not go back to the setup" >&2; return 1; }
+  tap_text "Restore from a backup" || return 1
+  open_in_picker || { echo "Could not pick the backup file" >&2; return 1; }
+  tap_text "Restore it" || return 1
+  sleep 12
+}
+
 if set_up; then
   # Home should open at the top; swipe down anyway so the dump sees it.
   adb shell input swipe 540 700 540 1900 200
@@ -113,6 +165,13 @@ if set_up; then
   adb exec-out screencap -p > "$OUT/2-home.png"
   adb shell uiautomator dump /sdcard/home.xml >/dev/null 2>&1
   adb pull /sdcard/home.xml "$OUT/ui-home.xml" >/dev/null 2>&1
+  if backup_round_trip; then
+    adb exec-out screencap -p > "$OUT/5-restored.png"
+    adb shell uiautomator dump /sdcard/restored.xml >/dev/null 2>&1
+    adb pull /sdcard/restored.xml "$OUT/ui-restored.xml" >/dev/null 2>&1
+  else
+    adb exec-out screencap -p > "$OUT/5-stuck.png"
+  fi
 else
   adb exec-out screencap -p > "$OUT/2-stuck.png"
 fi

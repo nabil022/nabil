@@ -39,7 +39,7 @@ welcome page also has **Try the demo**, which runs the whole app inside your
 browser with no account.
 
 ```bash
-npm test             # rules, usage maths, settlement, deposits, server + SQLite (38 tests)
+npm test             # rules, usage maths, settlement, deposits, phone profiles, backups, server + SQLite (44 tests)
 npm run typecheck    # four strict TypeScript projects
 npm run build        # dist/client (the PWA) + dist/server.mjs
 npm start            # production server on :3000, data in ./data/unrot.db
@@ -95,9 +95,15 @@ Android app does not connect to yet, so its Groups tab says so.
    use; your normal week, measured from the phone; and your goals.
 4. When the app asks, find Unrot in the **Usage access** list and switch it on.
 
-Your profile and history live in the app's storage on the phone. **Settings ›
-Your data › Erase everything on this phone** starts over; uninstalling the app
-erases it too.
+Your profile and history live in the app's storage on the phone.
+
+- **Backup and restore** (Settings › Your data): *Save a backup* writes
+  everything to one small file through Android's save screen, so it can go to
+  Google Drive or the phone's Downloads. *Restore from a backup* brings it back
+  after a reinstall or on a new phone, and the setup screen offers it too. Home
+  reminds you when the last backup is more than a week old.
+- **Erase everything on this phone** (same place) starts over. Uninstalling the
+  app erases its data too.
 
 Every push that touches `unrot/` runs that workflow: typecheck, all tests, the
 APK build, and an Android 14 emulator that installs the APK, grants Usage
@@ -105,20 +111,14 @@ access, sets up a profile the way a person would, and fails the run on a crash,
 a JavaScript error, or if the home screen doesn't show screen time read from
 the phone.
 
-**Updates install over the old app only if every build is signed with the
-same key.** Without a key, CI signs each build with a one-off debug key and you
-uninstall before installing the next one, **which erases what the app saved**.
-To set a key up once:
-
-```bash
-keytool -genkeypair -keystore unrot.keystore -alias unrot -keyalg RSA -keysize 2048 -validity 10000
-base64 -w 0 unrot.keystore   # copy the output
-```
-
-Then add four repository secrets (Settings › Secrets and variables › Actions):
-`UNROT_KEYSTORE_B64` (that output), `UNROT_KEYSTORE_PASSWORD`, `UNROT_KEY_ALIAS`
-(`unrot`) and `UNROT_KEY_PASSWORD`. Keep the keystore file somewhere safe and
-never commit it: anyone with the key can publish "updates" to your app.
+**Updates install over the old app and keep its data**, because every build is
+signed with the same key. The key is kept out of the repository, in the
+`UNROT_SIGNING_KEY` repository secret (Settings › Secrets and variables ›
+Actions). Without that secret, CI signs with a one-off key and says so in a
+warning: that APK can't update an installed app, and uninstalling erases what
+the app saved. Every run prints which key signed its APK, and fails if the
+secret is set but the permanent key wasn't used. `android/signing/README.md`
+has the details, including how to replace a lost key.
 
 **Building it yourself** needs JDK 21 and the Android SDK (Android Studio
 installs both): `npm run build:android`, then open `android/` in Android Studio
@@ -280,10 +280,12 @@ src/server/    node:http + node:sqlite persistence, scrypt passwords,
                rate limits, security headers, static hosting
 src/client/    React PWA; talks to the server, or runs the same engine on the
                device with localStorage: the demo, and the Android app's
-               phone mode (lib/local.ts; first-run setup in screens/Setup.tsx)
+               phone mode (lib/local.ts; first-run setup in screens/Setup.tsx,
+               backups in lib/backup.ts and screens/Backup.tsx)
   lib/native.ts, lib/tracking*.ts   the Android side: plugin, sync, reminders
 src/shared/usage.ts   Android usage events -> minutes per app per day
-android/       the Capacitor Android project and the UsageStats plugin
+android/       the Capacitor Android project, the UsageStats and Backup plugins,
+               and the signing key (android/signing, locked by a secret)
 tests/         Vitest: engine scenarios, Android usage maths, the demo world
                in 4 time zones, the HTTP server with SQLite restarts
 scripts/       server bundle, standalone demo, icons (web and Android),

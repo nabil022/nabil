@@ -2,7 +2,10 @@
 // API; in demo and phone mode it is the very same engine running on the device
 // (phone mode is the Android app: your own profile, saved on the phone).
 
+import type { SavedWorld } from './backup';
 import { storage } from './storage';
+
+export type { SavedWorld };
 
 export class ApiError extends Error {
   constructor(
@@ -23,6 +26,10 @@ export interface Api {
   call<T>(method: string, path: string, body?: unknown): Promise<T>;
   /** Demo and phone only: wipe the data on this device (the demo starts over). */
   reset?(): Promise<void>;
+  /** Demo and phone only: everything on this device, for a backup. */
+  snapshot?(): SavedWorld;
+  /** Demo and phone only: replace everything on this device (a checked backup) and save it. */
+  restore?(world: SavedWorld): void;
 }
 
 const TOKEN_KEY = 'unrot.token';

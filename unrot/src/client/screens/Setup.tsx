@@ -11,6 +11,7 @@ import { AVATARS, AVATAR_COLORS } from '../../shared/profile';
 import { sleepMinutes } from '../../shared/sleep';
 import { useApp } from '../lib/app';
 import { BrainMark } from '../ui/icons';
+import { RestoreOnSetup } from './Backup';
 import { Avatar, Button, Card, Field, cx } from '../ui/kit';
 
 const STEPS = ['About you', 'Your routine'];
@@ -177,6 +178,9 @@ export function Setup() {
               Next
             </Button>
           </form>
+        ) : null}
+        {step === 0 ? (
+          <RestoreOnSetup />
         ) : null}
 
         {step === 1 ? (

@@ -187,7 +187,19 @@ await page.evaluate(() => (location.hash = '/settings'));
 await expectText(/Your routine/, 'routine settings after restart');
 await expectValue('#s-wake', '06:45', 'wake-up kept after restart');
 
+// Back up to a file (Android's save screen is faked: the file stays in the page).
+await page.getByRole('link', { name: 'Backup and restore' }).click();
+await expectText(/No backup yet/, 'no backup yet');
+await page.getByRole('button', { name: 'Save a backup' }).click();
+await expectText(/Backup saved/, 'backup saved toast');
+await expectText(/Last backup: /, 'last backup shown');
+const saved = await page.evaluate(() => Object.keys(window.__UNROT_FAKE_NATIVE__?.files ?? {}));
+console.log('backup files:', saved.join(', '));
+if (!saved.some((n) => /^unrot-backup-\d{4}-\d{2}-\d{2}\.json$/.test(n))) errors.push(`unexpected backup file name: ${saved}`);
+await shot('a08-backup');
+
 // Erasing starts again from the setup and leaves nothing behind.
+await page.evaluate(() => (location.hash = '/settings'));
 await page.getByRole('button', { name: 'Erase everything on this phone' }).click();
 await page.getByRole('button', { name: 'Erase for good' }).click();
 await expectText(/Welcome to/, 'back to setup after erase');
@@ -196,6 +208,28 @@ const phone = await page.evaluate(() => JSON.parse(localStorage.getItem('unrot.p
 console.log('storage after erase:', left.join(', ') || '(nothing)');
 if (phone?.data?.users?.length) errors.push('the profile survived the erase');
 if (left.some((k) => k !== 'unrot.phone.v1')) errors.push(`left behind after erase: ${left.join(', ')}`);
+
+// Restore from the setup screen: the profile, history and settings come back.
+await page.getByRole('button', { name: 'Restore from a backup' }).click();
+await expectText(/Restore this backup\?/, 'restore confirmation');
+await expectText(/days? of data/, 'backup summary');
+await shot('a09-restore-confirm');
+await page.getByRole('button', { name: 'Restore it' }).click();
+await page.waitForLoadState('load');
+await expectText(/, Sam/, 'greeting after restore');
+await page.evaluate(() => (location.hash = '/settings'));
+await expectText(/Your routine/, 'settings after restore');
+await expectValue('#s-wake', '06:45', 'wake-up restored');
+const restoredPrefs = await page.evaluate(() => ['unrot.extraApps', 'unrot.lastBackup'].filter((k) => localStorage.getItem(k) !== null));
+if (restoredPrefs.length !== 2) errors.push(`settings not restored: ${restoredPrefs.join(', ')}`);
+
+// Home reminds you when the last backup is more than a week old.
+await page.evaluate(() => (location.hash = '/'));
+await expectText(/, Sam/, 'home after restore');
+if (await page.getByText('Back up your data').count()) errors.push('backup reminder shown right after a backup');
+await page.evaluate(() => localStorage.setItem('unrot.lastBackup', String(Date.now() - 10 * 86_400_000)));
+await page.reload();
+await expectText(/Back up your data/, 'backup reminder after 10 days');
 
 await browser.close();
 if (errors.length) {

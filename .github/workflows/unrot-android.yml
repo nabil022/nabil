@@ -1,7 +1,8 @@
 # Builds the Unrot Android app (unrot/) and proves it runs: tests and
 # typecheck, then the APK, then an Android 14 emulator installs it, grants
-# Usage access, sets up a profile like a person would, and checks the home
-# screen shows screen time read from the phone, without errors.
+# Usage access, sets up a profile like a person would, checks the home screen
+# shows screen time read from the phone, then saves a backup, erases the app
+# and restores it through Android's own file screens, without errors.
 # The APK is kept on the run's page as a plain .apk (not a zip), so a phone
 # can open the download straight into the installer.
 name: Unrot Android
@@ -62,26 +63,37 @@ jobs:
       - name: Build the APK
         working-directory: unrot/android
         env:
-          # Optional repository secrets (see unrot/README.md). Without them the
-          # APK is signed with a one-off debug key.
-          UNROT_KEYSTORE_B64: ${{ secrets.UNROT_KEYSTORE_B64 }}
-          UNROT_KEYSTORE_PASSWORD: ${{ secrets.UNROT_KEYSTORE_PASSWORD }}
-          UNROT_KEY_ALIAS: ${{ secrets.UNROT_KEY_ALIAS }}
-          UNROT_KEY_PASSWORD: ${{ secrets.UNROT_KEY_PASSWORD }}
+          # The app's permanent key: a PKCS#12 keystore in base64, kept only in
+          # this repository secret (see unrot/android/signing/README.md). Its own
+          # password is not a secret. Without it, the APK gets a one-off key and
+          # cannot update an installed app.
+          UNROT_SIGNING_KEY: ${{ secrets.UNROT_SIGNING_KEY }}
         run: |
-          if [ -n "$UNROT_KEYSTORE_B64" ]; then
-            echo "$UNROT_KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/unrot.keystore"
-            export UNROT_KEYSTORE_FILE="$RUNNER_TEMP/unrot.keystore"
-            echo "Signing with the repository's private key."
+          if [ -n "$UNROT_SIGNING_KEY" ]; then
+            printf '%s' "$UNROT_SIGNING_KEY" | tr -d ' \r\n' | base64 -d > "$RUNNER_TEMP/unrot-signing.p12"
+            export UNROT_KEYSTORE_FILE="$RUNNER_TEMP/unrot-signing.p12"
+            export UNROT_KEYSTORE_PASSWORD=unrot-signing UNROT_KEY_ALIAS=unrot UNROT_KEY_PASSWORD=unrot-signing
+            echo "UNROT_SIGNING=permanent" >> "$GITHUB_ENV"
+            echo "Signing with the app's permanent key."
           else
-            echo "No signing secret set: signing with a one-off debug key."
+            echo "UNROT_SIGNING=one-off" >> "$GITHUB_ENV"
+            echo "::warning::No UNROT_SIGNING_KEY secret, so this APK is signed with a one-off key and cannot update an installed Unrot (see unrot/android/signing/README.md)."
           fi
           ./gradlew assembleDebug --no-daemon --stacktrace
 
-      - name: Name the APK
+      - name: Name the APK and check its key
         run: |
           cp android/app/build/outputs/apk/debug/app-debug.apk unrot-android.apk
           ls -l unrot-android.apk
+          apksigner="$(ls -d "$ANDROID_HOME"/build-tools/*/ | sort -V | tail -1)apksigner"
+          cert=$("$apksigner" verify --print-certs unrot-android.apk | sed -n 's/.*certificate SHA-256 digest: //p' | head -1)
+          echo "Signed by the certificate with SHA-256 $cert"
+          if [ "$cert" = "$(cat android/signing/unrot-signing.sha256)" ]; then
+            echo "That is the app's permanent key: this APK installs over earlier ones and keeps their data."
+          elif [ "$UNROT_SIGNING" = "permanent" ]; then
+            echo "::error::The APK is not signed with the app's permanent key (android/signing/unrot-signing.sha256)."
+            exit 1
+          fi
 
       # archive: false uploads the bare file; the artifact takes its name.
       - uses: actions/upload-artifact@v7
@@ -148,15 +160,18 @@ jobs:
           # Headings are styled in capitals, which Android reports as rendered: match any case.
           if ! grep -qi "today so far, from your phone" ui-home.xml 2>/dev/null; then echo "::error::Home did not show today's screen time from the phone"; fail=1; fi
           if ! grep -q ", Sam" ui-home.xml 2>/dev/null; then echo "::error::Home did not greet the profile set up on the phone"; fail=1; fi
+          echo "--- Text after saving a backup, erasing and restoring it ---"
+          texts ui-restored.xml
+          if ! grep -q ", Sam" ui-restored.xml 2>/dev/null; then echo "::error::Restoring the backup did not bring the profile back"; fail=1; fi
           # Small screenshots, printed so they can be read from the log.
           python3 -m pip install --quiet --disable-pip-version-check pillow >/dev/null 2>&1 || true
-          for f in 1-setup 2-home 2-stuck; do
+          for f in 1-setup 2-home 2-stuck 3-save-screen 4-open-screen 5-restored 5-stuck; do
             if [ -f "$f.png" ] && python3 -c "from PIL import Image; im=Image.open('$f.png').convert('RGB'); im.thumbnail((360, 800)); im.save('$f.jpg', quality=55)" 2>/dev/null; then
               echo "BEGIN-IMG $f"; base64 -w 0 "$f.jpg"; echo; echo "END-IMG $f"
             fi
           done
           if [ "$fail" = 1 ]; then exit 1; fi
-          echo "The app sets up a profile on the phone, reads usage data and shows it."
+          echo "The app sets up a profile on the phone, reads usage data, and backs up and restores it."
 
       - uses: actions/upload-artifact@v7
         if: always()
