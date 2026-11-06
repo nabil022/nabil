@@ -133,8 +133,9 @@ hide_keyboard() {
 }
 
 set_up() {
-  # Keep a dump of the first screen for the checks, if the one at launch failed.
-  grep -q "<hierarchy" "$OUT/ui-setup.xml" 2>/dev/null || { see_text "Welcome to" && cp "$OUT/ui-search.xml" "$OUT/ui-setup.xml"; }
+  # Keep a full dump of the first screen for the checks. The one at launch can
+  # be empty: the WebView only builds its accessibility tree once a reader asks.
+  grep -qi "Welcome to" "$OUT/ui-setup.xml" 2>/dev/null || { see_text "Welcome to" && cp "$OUT/ui-search.xml" "$OUT/ui-setup.xml"; }
   # 1 of 5: about you. Enter in the year field submits the form.
   tap_text "First name" || return 1
   sleep 1
