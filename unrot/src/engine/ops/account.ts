@@ -16,7 +16,9 @@ import {
   email as parseEmail,
   hm,
   int,
+  notFound,
   oneOf,
+  optHm,
   str,
   unauthorized,
   type Body,
@@ -46,6 +48,9 @@ export interface Me {
   studyStart: string;
   studyBufferMin: number;
   studyMaxMin: number;
+  /** Usual bedtime and wake-up time (HH:MM), if given. */
+  bedtime: string | null;
+  wakeTime: string | null;
   xp: number;
   level: LevelInfo;
   balanceCents: number;
@@ -81,6 +86,8 @@ export function meView(ctx: Ctx, u: UserDoc): Me {
     studyStart: u.studyStart,
     studyBufferMin: u.studyBufferMin,
     studyMaxMin: u.studyMaxMin,
+    bedtime: u.bedtime ?? null,
+    wakeTime: u.wakeTime ?? null,
     xp: u.xp,
     level: levelInfo(u.xp),
     balanceCents: u.balanceCents,
@@ -98,15 +105,63 @@ function birthYear(ctx: Ctx, v: unknown): number {
   return y;
 }
 
-function newSession(ctx: Ctx, userId: string): string {
+/** A phone profile can never log in again, so its session does not expire. */
+const PHONE_SESSION_DAYS = 100 * 365;
+
+function newSession(ctx: Ctx, userId: string, days: number = ACCOUNT.SESSION_DAYS): string {
   const token = ctx.crypto.randomHex(32);
   ctx.db.sessions.insert({
     id: ctx.crypto.hashToken(token),
     userId,
     createdAt: ctx.now(),
-    expiresAt: ctx.now() + ACCOUNT.SESSION_DAYS * 86_400_000,
+    expiresAt: ctx.now() + days * 86_400_000,
   });
   return token;
+}
+
+interface NewUser {
+  name: string;
+  email: string;
+  passwordHash: string;
+  birthYear: number;
+  timezone: string;
+  avatar?: string;
+  color?: number;
+  cutoff?: string;
+  studyStart?: string;
+  bedtime?: string | null;
+  wakeTime?: string | null;
+}
+
+function createUser(ctx: Ctx, n: NewUser): UserDoc {
+  const rand = parseInt(ctx.crypto.randomHex(2), 16);
+  const u: UserDoc = {
+    id: ctx.newId(),
+    name: n.name,
+    email: n.email,
+    passwordHash: n.passwordHash,
+    birthYear: n.birthYear,
+    timezone: n.timezone,
+    avatar: n.avatar ?? AVATARS[rand % AVATARS.length]!,
+    color: n.color ?? rand % AVATAR_COLORS.length,
+    apps: [...DEFAULT_USER_APPS],
+    baseline: null,
+    dailyGoalMin: 120,
+    cutoff: n.cutoff ?? ACCOUNT.DEFAULT_CUTOFF,
+    studyStart: n.studyStart ?? PLANNER.DEFAULT_STUDY_START,
+    studyBufferMin: PLANNER.DEFAULT_BUFFER_MIN,
+    studyMaxMin: PLANNER.DEFAULT_MAX_DAILY_MIN,
+    bedtime: n.bedtime ?? null,
+    wakeTime: n.wakeTime ?? null,
+    xp: 0,
+    balanceCents: 0,
+    publicProfile: true,
+    onboarded: false,
+    createdAt: ctx.now(),
+  };
+  ctx.db.users.insert(u);
+  ctx.money(u.id, 'welcome', MONEY.STARTING_BALANCE_CENTS, 'Welcome money (simulated, not real)');
+  return u;
 }
 
 export function register(ctx: Ctx, body: Body): { token: string; me: Me } {
@@ -117,40 +172,42 @@ export function register(ctx: Ctx, body: Body): { token: string; me: Me } {
   const by = birthYear(ctx, body.birthYear);
   const tz = isValidTimeZone(body.timezone) ? body.timezone : 'UTC';
   if (ctx.db.users.by('email', mail).length) throw conflict('An account with that email already exists. Log in instead.', 'email_taken');
+  const u = createUser(ctx, { name, email: mail, passwordHash: ctx.crypto.hashPassword(body.password), birthYear: by, timezone: tz });
+  return { token: newSession(ctx, u.id), me: meView(ctx, ctx.user(u.id)) };
+}
 
-  const rand = parseInt(ctx.crypto.randomHex(2), 16);
-  const u: UserDoc = {
-    id: ctx.newId(),
+/**
+ * The Android app keeps everything on the phone: its one profile has no email
+ * or password, so nobody can log in to it from anywhere else. Only the app's
+ * on-phone engine (created with `localProfiles`) has this; a server answers 404.
+ */
+export function createLocalProfile(ctx: Ctx, body: Body): { token: string; me: Me } {
+  if (!ctx.localProfiles) throw notFound('Nothing lives at that address.');
+  if (ctx.db.users.all().length) throw conflict('This phone already has a profile.', 'profile_exists');
+  const name = str(body.name, 'Name', { max: 40 });
+  const by = birthYear(ctx, body.birthYear);
+  const tz = isValidTimeZone(body.timezone) ? body.timezone : 'UTC';
+  const u = createUser(ctx, {
     name,
-    email: mail,
-    passwordHash: ctx.crypto.hashPassword(body.password),
+    email: '',
+    passwordHash: '',
     birthYear: by,
     timezone: tz,
-    avatar: AVATARS[rand % AVATARS.length]!,
-    color: rand % AVATAR_COLORS.length,
-    apps: [...DEFAULT_USER_APPS],
-    baseline: null,
-    dailyGoalMin: 120,
-    cutoff: ACCOUNT.DEFAULT_CUTOFF,
-    studyStart: PLANNER.DEFAULT_STUDY_START,
-    studyBufferMin: PLANNER.DEFAULT_BUFFER_MIN,
-    studyMaxMin: PLANNER.DEFAULT_MAX_DAILY_MIN,
-    xp: 0,
-    balanceCents: 0,
-    publicProfile: true,
-    onboarded: false,
-    createdAt: ctx.now(),
-  };
-  ctx.db.users.insert(u);
-  ctx.money(u.id, 'welcome', MONEY.STARTING_BALANCE_CENTS, 'Welcome money (simulated, not real)');
-  return { token: newSession(ctx, u.id), me: meView(ctx, ctx.user(u.id)) };
+    avatar: body.avatar === undefined ? undefined : oneOf(body.avatar, 'Avatar', AVATARS),
+    color: body.color === undefined ? undefined : int(body.color, 'Colour', { min: 0, max: AVATAR_COLORS.length - 1 }),
+    cutoff: body.cutoff === undefined ? undefined : hm(body.cutoff, 'Cut-off'),
+    studyStart: body.studyStart === undefined ? undefined : hm(body.studyStart, 'Homework start'),
+    bedtime: optHm(body.bedtime, 'Bedtime'),
+    wakeTime: optHm(body.wakeTime, 'Wake-up time'),
+  });
+  return { token: newSession(ctx, u.id, PHONE_SESSION_DAYS), me: meView(ctx, ctx.user(u.id)) };
 }
 
 export function login(ctx: Ctx, body: Body): { token: string; me: Me } {
   const mail = typeof body.email === 'string' ? body.email.trim().toLowerCase() : '';
   const password = typeof body.password === 'string' ? body.password : '';
   const u = ctx.db.users.by('email', mail)[0];
-  if (!u || !ctx.crypto.verifyPassword(password, u.passwordHash)) {
+  if (!u || !u.passwordHash || !ctx.crypto.verifyPassword(password, u.passwordHash)) {
     throw unauthorized('That email and password do not match an account.');
   }
   return { token: newSession(ctx, u.id), me: meView(ctx, u) };
@@ -189,6 +246,8 @@ export function updateMe(ctx: Ctx, u: UserDoc, body: Body): Me {
   if (body.studyStart !== undefined) patch.studyStart = hm(body.studyStart, 'Study start');
   if (body.studyBufferMin !== undefined) patch.studyBufferMin = int(body.studyBufferMin, 'Buffer', { min: 0, max: 240 });
   if (body.studyMaxMin !== undefined) patch.studyMaxMin = int(body.studyMaxMin, 'Daily study limit', { min: 15, max: 600 });
+  if (body.bedtime !== undefined) patch.bedtime = optHm(body.bedtime, 'Bedtime');
+  if (body.wakeTime !== undefined) patch.wakeTime = optHm(body.wakeTime, 'Wake-up time');
   if (body.publicProfile !== undefined) patch.publicProfile = bool(body.publicProfile, 'Public profile');
   if (body.onboarded !== undefined) patch.onboarded = bool(body.onboarded, 'Onboarded');
   return meView(ctx, ctx.db.users.update(u.id, patch));

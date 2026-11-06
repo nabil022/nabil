@@ -15,9 +15,9 @@ export class Harness {
   readonly store = new Store();
   readonly engine: Engine;
 
-  constructor(start: string) {
+  constructor(start: string, opts: { localProfiles?: boolean } = {}) {
     this.now = Date.parse(start);
-    this.engine = new Engine({ store: this.store, crypto: fastCrypto, now: () => this.now });
+    this.engine = new Engine({ store: this.store, crypto: fastCrypto, now: () => this.now, localProfiles: opts.localProfiles });
     this.engine.onError = (e) => {
       throw e;
     };

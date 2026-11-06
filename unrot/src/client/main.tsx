@@ -29,7 +29,8 @@ if (IS_REAL_NATIVE) {
       const { granted, sdk } = await UsageStats.status();
       let events = -1;
       if (granted) events = (await UsageStats.queryEvents({ start: Date.now() - 86_400_000, end: Date.now() })).events.length;
-      console.info(`[unrot] usage access: granted=${granted} sdk=${sdk} events=${events}`);
+      const webview = /Chrome\/(\d+)/.exec(navigator.userAgent)?.[1] ?? '?';
+      console.info(`[unrot] usage access: granted=${granted} sdk=${sdk} events=${events} webview=${webview}`);
     } catch (err) {
       console.error(`[unrot] usage access check failed: ${err instanceof Error ? err.message : String(err)}`);
     }

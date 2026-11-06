@@ -14,7 +14,8 @@ import { useEffect } from 'react';
 
 const STEPS = ['Apps', 'Your normal', 'Goals'];
 
-export function Onboarding() {
+/** `stepOffset`/`totalSteps`: where these steps sit when a setup came before them (Android). */
+export function Onboarding({ stepOffset = 0, totalSteps = STEPS.length }: { stepOffset?: number; totalSteps?: number } = {}) {
   const { me, api, setMe, toast, refresh } = useApp();
   const { go } = useRouter();
   const [step, setStep] = useState(0);
@@ -60,6 +61,9 @@ export function Onboarding() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [waiting, apps],
   );
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [step]);
   const goal = Math.max(15, Math.round((total * (1 - goalPct / 100)) / 5) * 5);
 
   const finish = async () => {
@@ -86,7 +90,7 @@ export function Onboarding() {
           <BrainMark size={26} />
           <h1 className="topbar-title">{STEPS[step]}</h1>
           <span className="tiny">
-            {step + 1} of {STEPS.length}
+            {step + 1 + stepOffset} of {totalSteps}
           </span>
         </div>
       </header>
@@ -195,7 +199,15 @@ export function Onboarding() {
                   </div>
                 </Field>
                 <hr className="divider" />
-                <Field label="Nightly screen cut-off" htmlFor="onb-cutoff" hint="Phone down from this time. The check-in asks how it went.">
+                <Field
+                  label="Nightly screen cut-off"
+                  htmlFor="onb-cutoff"
+                  hint={
+                    me?.bedtime
+                      ? `Phone down from this time: an hour before your usual ${me.bedtime} bedtime works well. The check-in asks how it went.`
+                      : 'Phone down from this time. The check-in asks how it went.'
+                  }
+                >
                   <input id="onb-cutoff" className="input" type="time" value={cutoff} onChange={(e) => setCutoff(e.target.value)} />
                 </Field>
               </div>

@@ -1,5 +1,6 @@
 // The client talks to one interface. In server mode it is fetch() to the Node
-// API; in demo mode it is the very same engine running in the browser.
+// API; in demo and phone mode it is the very same engine running on the device
+// (phone mode is the Android app: your own profile, saved on the phone).
 
 import { storage } from './storage';
 
@@ -13,14 +14,14 @@ export class ApiError extends Error {
   }
 }
 
-export type Mode = 'server' | 'demo';
+export type Mode = 'server' | 'demo' | 'phone';
 
 export interface Api {
   readonly mode: Mode;
   readonly token: string | null;
   setToken(token: string | null): void;
   call<T>(method: string, path: string, body?: unknown): Promise<T>;
-  /** Demo only: wipe local data and rebuild the demo world. */
+  /** Demo and phone only: wipe the data on this device (the demo starts over). */
   reset?(): Promise<void>;
 }
 

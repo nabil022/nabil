@@ -5,8 +5,7 @@ import { project } from '../../shared/calculator';
 import { fmtMin, fmtNumber } from '../../shared/format';
 import { verdict } from '../../shared/scoring';
 import { STANDALONE, useApp } from '../lib/app';
-import { ApiError, normaliseServerUrl, serverUrl } from '../lib/api';
-import { IS_NATIVE } from '../lib/native';
+import { ApiError } from '../lib/api';
 import { Link, useRouter } from '../lib/router';
 import { storage } from '../lib/storage';
 import { BrainMark, Icon, type IconName } from '../ui/icons';
@@ -110,70 +109,9 @@ const FEATURES: { icon: IconName; title: string; body: string }[] = [
   { icon: 'heart', title: 'Health %', body: 'Physical and mental scores compared with people your age.' },
 ];
 
-/** Android app: which Unrot server your group uses. */
-function ServerSetup() {
-  const { connectServer, toast } = useApp();
-  const current = serverUrl();
-  const [editing, setEditing] = useState(!current);
-  const [value, setValue] = useState(current);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  if (!editing) {
-    return (
-      <p className="tiny">
-        Server: {current.replace(/^https?:\/\//, '')} ·{' '}
-        <button className="link" style={{ fontSize: 'inherit' }} onClick={() => setEditing(true)}>
-          change
-        </button>
-      </p>
-    );
-  }
-  return (
-    <Card>
-      <form
-        className="stack"
-        style={{ gap: 10 }}
-        onSubmit={async (e) => {
-          e.preventDefault();
-          const url = normaliseServerUrl(value);
-          if (!url) return setError('Enter an address like unrot.example.com');
-          setBusy(true);
-          setError(null);
-          try {
-            await connectServer(url);
-            setEditing(false);
-            toast('Connected', 'good');
-          } catch (err) {
-            setError(err instanceof Error ? err.message : 'Could not connect.');
-          } finally {
-            setBusy(false);
-          }
-        }}
-      >
-        <Field label="Your group's Unrot server" htmlFor="server-url" hint="Whoever set Unrot up for your group has this address. No server yet? Try the demo." error={error}>
-          <input
-            id="server-url"
-            className="input"
-            inputMode="url"
-            autoCapitalize="none"
-            autoCorrect="off"
-            placeholder="unrot.example.com"
-            value={value}
-            onChange={(e) => setValue(e.target.value)}
-          />
-        </Field>
-        <Button type="submit" busy={busy} disabled={!value.trim()}>
-          Connect
-        </Button>
-      </form>
-    </Card>
-  );
-}
-
 export function Welcome() {
   const { startDemo } = useApp();
   const [busy, setBusy] = useState(false);
-  const needsServer = IS_NATIVE && !serverUrl();
   return (
     <div className="screen">
       <header className="topbar">
@@ -182,11 +120,9 @@ export function Welcome() {
             <BrainMark size={30} />
             <span className="wordmark">Unrot</span>
           </div>
-          {!needsServer ? (
-            <Link to="/login" className="btn btn-quiet btn-sm">
-              Log in
-            </Link>
-          ) : null}
+          <Link to="/login" className="btn btn-quiet btn-sm">
+            Log in
+          </Link>
         </div>
       </header>
       <main className="content">
@@ -196,21 +132,14 @@ export function Welcome() {
           </h1>
           <p className="lead">Add up your daily scrolling, see what it costs you in a year, then cut it down with your friends.</p>
         </div>
-        {IS_NATIVE ? <ServerSetup /> : null}
         <Calculator />
         <Card tone="brand">
           <div className="stack" style={{ gap: 10 }}>
             <h2 className="card-title">Unrot it with your friends</h2>
-            <p className="card-sub">
-              {IS_NATIVE
-                ? 'Your phone measures your screen time. Take on challenges and compete for the weekly pot.'
-                : 'Log your screen time in 30 seconds a day, take on challenges and compete for the weekly pot.'}
-            </p>
-            {!needsServer ? (
-              <Link to="/register" className="btn btn-primary btn-lg btn-block">
-                Create an account
-              </Link>
-            ) : null}
+            <p className="card-sub">Log your screen time in 30 seconds a day, take on challenges and compete for the weekly pot.</p>
+            <Link to="/register" className="btn btn-primary btn-lg btn-block">
+              Create an account
+            </Link>
             {!STANDALONE ? (
               <Button
                 variant="secondary"

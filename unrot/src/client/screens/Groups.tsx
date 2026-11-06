@@ -7,8 +7,6 @@ import { formatCents } from '../../shared/money';
 import { GROUP_EMOJIS } from '../../shared/profile';
 import type { FeedDoc, StandingRow } from '../../shared/types';
 import { STANDALONE, useApp, useQuery } from '../lib/app';
-import { serverUrl } from '../lib/api';
-import { IS_NATIVE } from '../lib/native';
 import { Link, useRouter } from '../lib/router';
 import { storage } from '../lib/storage';
 import { Icon, type IconName } from '../ui/icons';
@@ -35,6 +33,26 @@ import {
 } from '../ui/kit';
 
 // -- list ---------------------------------------------------------------------------
+
+/**
+ * The Android app keeps everything on the phone for now. Groups need one
+ * online server that every friend's phone shares, so this says so instead.
+ */
+export function PhoneGroups() {
+  return (
+    <Screen title="Groups">
+      <Empty icon="groups" title="Groups need an online server">
+        Groups put you and your friends on one leaderboard, with weekly and monthly winners and a pot. Every phone in the group has to share one online server for that, and Unrot doesn't have one yet.
+      </Empty>
+      <Card>
+        <div className="stack" style={{ gap: 6 }}>
+          <div className="card-title">Everything else works now</div>
+          <p className="card-sub">Tracking, check-ins, challenges, deposits, health and the Sleep Reset all work on your own, and everything is saved on this phone.</p>
+        </div>
+      </Card>
+    </Screen>
+  );
+}
 
 export function Groups() {
   const { mutate } = useApp();
@@ -281,8 +299,6 @@ function ago(ts: number): string {
 
 function inviteLink(code: string): string {
   if (STANDALONE) return code;
-  // The Android app runs from https://localhost, so share the server's address instead.
-  if (IS_NATIVE) return serverUrl() ? `${serverUrl()}/#/join/${code}` : code;
   return `${window.location.origin}${window.location.pathname}#/join/${code}`;
 }
 

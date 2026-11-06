@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Runs in CI against an Android emulator: install the APK, grant Usage access,
-# launch, open the demo, and save evidence (screenshots, UI dumps, logcat).
+# launch, set up a profile the way a person would (name, birth year, routine,
+# apps, normal week, goals), and save evidence (screenshots, UI dumps, logcat).
 #
 #   bash unrot/scripts/ci-emulator.sh path/to/unrot-android.apk evidence-dir
 set -u
@@ -13,10 +14,13 @@ adb shell appops set app.unrot GET_USAGE_STATS allow
 # Some phone use to read back: open Settings for a moment.
 adb shell monkey -p com.android.settings -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1 || true
 sleep 5
+adb shell dumpsys webviewupdate 2>/dev/null | grep -iE "current webview package|version" | head -3 || true
 adb logcat -c
 adb shell am start -W -n app.unrot/.MainActivity
 sleep 20
-adb exec-out screencap -p > "$OUT/1-welcome.png"
+adb exec-out screencap -p > "$OUT/1-setup.png"
+adb shell uiautomator dump /sdcard/setup.xml >/dev/null 2>&1
+adb pull /sdcard/setup.xml "$OUT/ui-setup.xml" >/dev/null 2>&1
 
 # Tap the first element on screen whose text contains $1, scrolling down to find it.
 tap_text() {
@@ -52,14 +56,65 @@ PY
   return 1
 }
 
-if tap_text "Try the demo first"; then
-  sleep 15
-  # The app should open the demo at the top; swipe down anyway so the dump sees it.
+# True if text $1 is anywhere on screen (any case: some headings render in capitals).
+see_text() {
+  adb shell uiautomator dump /sdcard/ui.xml >/dev/null 2>&1
+  adb pull /sdcard/ui.xml "$OUT/ui-search.xml" >/dev/null 2>&1
+  grep -qiF "$1" "$OUT/ui-search.xml"
+}
+
+# Close the on-screen keyboard if it is open (Back would leave the app otherwise).
+hide_keyboard() {
+  if adb shell dumpsys input_method | grep -qE "mInputShown=true|isInputViewShown=true"; then
+    adb shell input keyevent 4
+    sleep 1
+  fi
+}
+
+set_up() {
+  # 1 of 5: about you. Enter in the year field submits the form.
+  tap_text "First name" || return 1
+  sleep 1
+  adb shell input text "Sam"
+  tap_text "Year you were born" || return 1
+  sleep 1
+  adb shell input text "2010"
+  adb shell input keyevent 66
+  sleep 3
+  hide_keyboard
+  if ! see_text "Usual bedtime"; then
+    tap_text "Next" || return 1
+    sleep 3
+  fi
+  see_text "Usual bedtime" || { echo "Setup did not reach the routine step" >&2; return 1; }
+  # 2 of 5: the routine (the defaults are fine). Next makes the profile.
+  tap_text "Next" || return 1
+  sleep 4
+  see_text "Which apps eat your time" || { echo "Setup did not reach the apps step" >&2; return 1; }
+  # 3 of 5: apps.
+  tap_text "Next" || return 1
+  sleep 3
+  # 4 of 5: your normal. Read the phone, then make sure the day is not empty.
+  tap_text "Measure my last week" || return 1
+  sleep 5
+  tap_text "TikTok on a normal day: 5 minutes more" || return 1
+  sleep 1
+  tap_text "Next" || return 1
+  sleep 3
+  # 5 of 5: goals.
+  tap_text "Start" || return 1
+  sleep 12
+}
+
+if set_up; then
+  # Home should open at the top; swipe down anyway so the dump sees it.
   adb shell input swipe 540 700 540 1900 200
   sleep 2
-  adb exec-out screencap -p > "$OUT/2-demo-home.png"
+  adb exec-out screencap -p > "$OUT/2-home.png"
   adb shell uiautomator dump /sdcard/home.xml >/dev/null 2>&1
   adb pull /sdcard/home.xml "$OUT/ui-home.xml" >/dev/null 2>&1
+else
+  adb exec-out screencap -p > "$OUT/2-stuck.png"
 fi
 
 adb logcat -d > "$OUT/logcat.txt"

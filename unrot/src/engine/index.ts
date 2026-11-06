@@ -71,6 +71,7 @@ function open(method: string, path: string, handler: PublicHandler): void {
 
 open('POST', '/api/auth/register', (ctx, c) => account.register(ctx, c.body));
 open('POST', '/api/auth/login', (ctx, c) => account.login(ctx, c.body));
+open('POST', '/api/auth/local', (ctx, c) => account.createLocalProfile(ctx, c.body));
 on('POST', '/api/auth/logout', (ctx, c) => (account.logout(ctx, c.token), { ok: true }));
 
 on('GET', '/api/me', (ctx, c) => account.meView(ctx, c.user));

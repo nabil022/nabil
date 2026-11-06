@@ -4,11 +4,12 @@ import { Link, match, useRouter } from './lib/router';
 import { Challenges } from './screens/Challenges';
 import { CheckIn } from './screens/CheckIn';
 import { DepositNew, Wallet } from './screens/Wallet';
-import { GroupDetailScreen, GroupNew, GroupSettings, Groups, Join } from './screens/Groups';
+import { GroupDetailScreen, GroupNew, GroupSettings, Groups, Join, PhoneGroups } from './screens/Groups';
 import { Health } from './screens/Health';
 import { Home } from './screens/Home';
 import { About, BaselineScreen, CalculatorScreen, Leaderboard, MeScreen, Settings, Stats } from './screens/Me';
 import { Onboarding } from './screens/Onboarding';
+import { ALL_STEPS, SETUP_STEPS, Setup } from './screens/Setup';
 import { Planner, SleepReset } from './screens/Sleep';
 import { Login, Register, Welcome } from './screens/Welcome';
 import { BrainMark, Icon, type IconName } from './ui/icons';
@@ -47,6 +48,9 @@ const PUBLIC_ROUTES: [string, View][] = [
   ['/register', () => <Register />],
   ['/join/:code', (p) => <Join code={p.code!} />],
 ];
+
+/** Phone mode has no server for friends to share, so group screens explain that instead. */
+const needsServer = (p: string) => p.startsWith('/groups') || p.startsWith('/join') || p.startsWith('/leaderboard');
 
 function resolve(routes: [string, View][], path: string): ReactNode | null {
   const [p, qs] = path.split('?');
@@ -127,7 +131,7 @@ export function App() {
   }
 
   if (!me) {
-    const view = resolve(PUBLIC_ROUTES, path) ?? <Welcome />;
+    const view = api.mode === 'phone' ? <Setup /> : (resolve(PUBLIC_ROUTES, path) ?? <Welcome />);
     return (
       <div className="app app-bare">
         {view}
@@ -139,13 +143,13 @@ export function App() {
   if (!me.onboarded) {
     return (
       <div className="app app-bare">
-        <Onboarding />
+        {api.mode === 'phone' ? <Onboarding stepOffset={SETUP_STEPS} totalSteps={ALL_STEPS} /> : <Onboarding />}
         <Toasts />
       </div>
     );
   }
 
-  const view = resolve(ROUTES, path) ?? <Home />;
+  const view = api.mode === 'phone' && needsServer(path.split('?')[0]!) ? <PhoneGroups /> : (resolve(ROUTES, path) ?? <Home />);
   return (
     <div className="app">
       <DemoBar />

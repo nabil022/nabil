@@ -217,8 +217,10 @@ textarea {
 
 /* -- shell ------------------------------------------------------------------ */
 
+/* Edge-to-edge (Android 15+, iPhone): start below the status bar. */
 .app {
   min-height: calc(100vh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+  padding-top: env(safe-area-inset-top, 0px);
   padding-bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom, 0px) + 24px);
 }
 

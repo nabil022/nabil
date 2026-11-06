@@ -27,6 +27,20 @@ export const storage = {
       return null;
     }
   },
+  /** Remove every key starting with `prefix`, except those in `keep`. */
+  clearPrefix(prefix: string, keep: readonly string[] = []): void {
+    try {
+      const ls = window.localStorage;
+      const doomed: string[] = [];
+      for (let i = 0; i < ls.length; i++) {
+        const k = ls.key(i);
+        if (k && k.startsWith(prefix) && !keep.includes(k)) doomed.push(k);
+      }
+      for (const k of doomed) ls.removeItem(k);
+    } catch {
+      // Nothing saved, or storage blocked: nothing to clear.
+    }
+  },
   setJSON(key: string, value: unknown): boolean {
     try {
       return storage.set(key, JSON.stringify(value));

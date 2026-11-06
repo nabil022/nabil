@@ -1,9 +1,15 @@
 // App-wide state: which backend, who is logged in, a refresh counter that
 // re-runs every query after a change, toasts, and the theme.
+//
+// The Android app always runs in phone mode: the engine on the phone with your
+// own profile, no demo and no server. The web app talks to its server, or runs
+// the demo in the browser.
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { Me } from '../../engine/ops/account';
-import { ApiError, httpApi, setServerUrl, type Api } from './api';
+import { ApiError, httpApi, type Api, type Mode } from './api';
+import { IS_NATIVE } from './native';
+import { DEFAULT_REMINDERS, applyReminders } from './reminders';
 import { storage } from './storage';
 
 export const STANDALONE = import.meta.env.VITE_STANDALONE === '1';
@@ -30,9 +36,8 @@ interface AppValue {
   signOut(): Promise<void>;
   startDemo(): Promise<void>;
   exitDemo(): void;
-  /** Android app: point at a server (after checking it answers) and reconnect. */
-  connectServer(url: string | null): Promise<void>;
-  resetDemo(): Promise<void>;
+  /** Wipe this device's data: the demo starts over; in phone mode everything is erased. */
+  resetLocal(): Promise<void>;
   toast(text: string, tone?: Toast['tone']): void;
   toasts: Toast[];
   theme: Theme;
@@ -43,12 +48,10 @@ interface AppValue {
 
 const AppContext = createContext<AppValue | null>(null);
 
-async function makeApi(mode: 'server' | 'demo'): Promise<Api> {
-  if (mode === 'demo') {
-    const { localApi } = await import('./local');
-    return localApi();
-  }
-  return httpApi();
+async function makeApi(mode: Mode): Promise<Api> {
+  if (mode === 'server') return httpApi();
+  const { localApi } = await import('./local');
+  return localApi(mode);
 }
 
 function applyTheme(t: Theme): void {
@@ -90,7 +93,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const boot = useCallback(
-    async (mode: 'server' | 'demo') => {
+    async (mode: Mode) => {
       setReady(false);
       const a = await makeApi(mode);
       setApi(a);
@@ -109,7 +112,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [theme]);
 
   useEffect(() => {
-    const mode = STANDALONE || storage.get(MODE_KEY) === 'demo' ? 'demo' : 'server';
+    if (IS_NATIVE) {
+      // Earlier test builds of the Android app had a demo; it is gone.
+      storage.set(MODE_KEY, null);
+      storage.set('unrot.demo.v1', null);
+    }
+    const mode: Mode = STANDALONE ? 'demo' : IS_NATIVE ? 'phone' : storage.get(MODE_KEY) === 'demo' ? 'demo' : 'server';
     void boot(mode);
   }, [boot]);
 
@@ -147,18 +155,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
         storage.set(MODE_KEY, null);
         void boot('server');
       },
-      async connectServer(url) {
-        if (url) {
-          const res = await fetch(`${url}/api/info`).catch(() => null);
-          const info = res && res.ok ? ((await res.json().catch(() => null)) as { name?: string } | null) : null;
-          if (info?.name !== 'Unrot') throw new Error('No Unrot server answered at that address. Check it and your connection.');
+      async resetLocal() {
+        if (api.mode === 'phone') {
+          // Reminders and tracking choices go too; only the theme stays.
+          await applyReminders({ ...DEFAULT_REMINDERS }, me?.cutoff ?? '22:30').catch(() => undefined);
+          storage.clearPrefix('unrot.', ['unrot.theme']);
         }
-        api.setToken(null);
-        setServerUrl(url);
-        storage.set(MODE_KEY, null);
-        await boot('server');
-      },
-      async resetDemo() {
         await api.reset?.();
         await loadMe(api);
         refresh();

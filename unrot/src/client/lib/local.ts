@@ -1,5 +1,7 @@
-// Demo mode: the real engine, seeded with five weeks of you and your friends,
-// running entirely in this browser. Nothing leaves the device.
+// The engine running on the device, saved in its storage. Nothing leaves it.
+//
+//   demo:  seeded with five weeks of a made-up you and your friends.
+//   phone: the Android app. Starts empty; you set up your own profile.
 
 import { Engine, Store, type EngineCrypto } from '../../engine';
 import { seedDemo } from '../../engine/seed';
@@ -7,7 +9,9 @@ import type { CollectionName, Doc } from '../../shared/types';
 import { ApiError, type Api } from './api';
 import { storage } from './storage';
 
-const KEY = 'unrot.demo.v1';
+export type LocalKind = 'demo' | 'phone';
+
+export const LOCAL_KEYS: Record<LocalKind, string> = { demo: 'unrot.demo.v1', phone: 'unrot.phone.v1' };
 
 interface Saved {
   version: 1;
@@ -21,7 +25,7 @@ function randomHex(bytes: number): string {
   return Array.from(buf, (b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-/** Not secure, and does not need to be: demo accounts never leave this device. */
+/** Not secure, and does not need to be: these accounts never leave this device. */
 function weakHash(s: string): string {
   let h1 = 0xdeadbeef;
   let h2 = 0x41c6ce57;
@@ -35,7 +39,7 @@ function weakHash(s: string): string {
   return (h2 >>> 0).toString(16).padStart(8, '0') + (h1 >>> 0).toString(16).padStart(8, '0');
 }
 
-const demoCrypto: EngineCrypto = {
+const deviceCrypto: EngineCrypto = {
   hashPassword: (pw) => `demo$${weakHash(`unrot:${pw}`)}`,
   verifyPassword: (pw, stored) => stored === `demo$${weakHash(`unrot:${pw}`)}`,
   hashToken: (t) => weakHash(t),
@@ -56,36 +60,51 @@ interface World {
   token: string | null;
 }
 
-function build(): World {
-  const saved = storage.getJSON<Saved>(KEY);
+function build(kind: LocalKind): World {
+  const localProfiles = kind === 'phone';
+  const saved = storage.getJSON<Saved>(LOCAL_KEYS[kind]);
   if (saved?.version === 1 && saved.data) {
     try {
       const store = new Store();
       store.load(saved.data);
-      return { engine: new Engine({ store, crypto: demoCrypto }), store, token: saved.token };
+      return { engine: new Engine({ store, crypto: deviceCrypto, localProfiles }), store, token: saved.token };
     } catch {
       // Corrupt save: fall through to a fresh world.
     }
   }
-  const seeded = seedDemo({ now: Date.now(), timezone: timezone(), crypto: demoCrypto });
+  if (kind === 'phone') {
+    const store = new Store();
+    return { engine: new Engine({ store, crypto: deviceCrypto, localProfiles }), store, token: null };
+  }
+  const seeded = seedDemo({ now: Date.now(), timezone: timezone(), crypto: deviceCrypto });
   return { engine: seeded.engine, store: seeded.store, token: seeded.token };
 }
 
-export function localApi(): Api {
-  let world = build();
+export function localApi(kind: LocalKind = 'demo'): Api {
+  let world = build(kind);
   let timer: ReturnType<typeof setTimeout> | null = null;
 
+  const write = () => {
+    if (timer) clearTimeout(timer);
+    timer = null;
+    storage.setJSON(LOCAL_KEYS[kind], { version: 1, token: world.token, data: world.store.snapshot() } satisfies Saved);
+  };
   const save = () => {
     if (timer) clearTimeout(timer);
-    timer = setTimeout(() => {
-      timer = null;
-      storage.setJSON(KEY, { version: 1, token: world.token, data: world.store.snapshot() } satisfies Saved);
-    }, 250);
+    timer = setTimeout(write, 250);
   };
+  // Save at once when the app goes to the background, where the phone may close it.
+  const flush = () => {
+    if (timer) write();
+  };
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') flush();
+  });
+  window.addEventListener('pagehide', flush);
   save();
 
   return {
-    mode: 'demo',
+    mode: kind,
     get token() {
       return world.token;
     },
@@ -111,9 +130,11 @@ export function localApi(): Api {
       return structuredClone(res.body) as T;
     },
     async reset() {
-      storage.set(KEY, null);
-      world = build();
-      save();
+      if (timer) clearTimeout(timer);
+      timer = null;
+      storage.set(LOCAL_KEYS[kind], null);
+      world = build(kind);
+      if (kind === 'demo') write();
     },
   };
 }

@@ -74,6 +74,48 @@ describe('accounts', () => {
   });
 });
 
+describe('phone profiles (Android, everything on the phone)', () => {
+  const profile = {
+    name: 'Sam', birthYear: 2010, timezone: 'Asia/Amman', avatar: '🦊', color: 2,
+    bedtime: '23:00', wakeTime: '07:00', studyStart: '16:30', cutoff: '22:00',
+  };
+
+  it('only exists on the phone: a server answers 404', () => {
+    const h = new Harness(`${MON}T09:00:00Z`);
+    expect(h.fail('POST', '/api/auth/local', undefined, profile).status).toBe(404);
+  });
+
+  it('makes the one profile without email or password, with the routine it was given', () => {
+    const h = new Harness(`${MON}T09:00:00Z`, { localProfiles: true });
+    const r = h.call('POST', '/api/auth/local', undefined, profile);
+    expect(r.me).toMatchObject({
+      name: 'Sam', email: '', age: 16, ageGroup: '13-17', timezone: 'Asia/Amman', avatar: '🦊', color: 2,
+      bedtime: '23:00', wakeTime: '07:00', studyStart: '16:30', cutoff: '22:00', onboarded: false, balanceCents: 2000,
+    });
+    expect(h.call('GET', '/api/me', r.token).name).toBe('Sam');
+    // One profile per phone, and nobody can log in to it.
+    expect(h.fail('POST', '/api/auth/local', undefined, { ...profile, name: 'Other' }).code).toBe('profile_exists');
+    expect(h.fail('POST', '/api/auth/login', undefined, { email: '', password: '' }).status).toBe(401);
+    // The session outlives the usual 60 days, since there is no way back in.
+    h.at('2027-06-01T09:00:00Z');
+    expect(h.call('GET', '/api/me', r.token).name).toBe('Sam');
+  });
+
+  it('validates the setup, and the routine can be changed or cleared later', () => {
+    const h = new Harness(`${MON}T09:00:00Z`, { localProfiles: true });
+    expect(h.fail('POST', '/api/auth/local', undefined, { ...profile, birthYear: 2016 }).code).toBe('too_young');
+    expect(h.fail('POST', '/api/auth/local', undefined, { ...profile, name: ' ' }).status).toBe(400);
+    expect(h.fail('POST', '/api/auth/local', undefined, { ...profile, bedtime: '25:00' }).status).toBe(400);
+    expect(h.fail('POST', '/api/auth/local', undefined, { ...profile, avatar: 'X' }).status).toBe(400);
+    // Nothing was half-made by the failures.
+    const r = h.call('POST', '/api/auth/local', undefined, { name: 'Sam', birthYear: 2010 });
+    expect(r.me).toMatchObject({ bedtime: null, wakeTime: null, cutoff: '22:30', timezone: 'UTC' });
+    expect(h.call('PATCH', '/api/me', r.token, { bedtime: '22:45', wakeTime: '06:50' })).toMatchObject({ bedtime: '22:45', wakeTime: '06:50' });
+    expect(h.fail('PATCH', '/api/me', r.token, { wakeTime: '7am' }).status).toBe(400);
+    expect(h.call('PATCH', '/api/me', r.token, { bedtime: null }).bedtime).toBeNull();
+  });
+});
+
 describe('check-ins', () => {
   it('only allows today and yesterday, and awards XP once', () => {
     const h = new Harness(`${MON}T09:00:00Z`);

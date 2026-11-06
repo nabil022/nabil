@@ -29,13 +29,14 @@ interface Form {
   lateHomework: boolean | null;
 }
 
-function fromLog(log: LogDoc | null, fallback: LogDoc | null, apps: string[]): Form {
+/** `usual`: the bedtime and wake-up from setup, used when no recent day has them. */
+function fromLog(log: LogDoc | null, fallback: LogDoc | null, apps: string[], usual: { bedtime: string | null; wakeTime: string | null }): Form {
   const src = log ?? null;
   return {
     apps: Object.fromEntries(apps.map((a) => [a, src?.apps[a] ?? 0])),
     lateNightMin: src?.lateNightMin ?? null,
-    bedtime: src?.bedtime ?? fallback?.bedtime ?? '',
-    wakeTime: src?.wakeTime ?? fallback?.wakeTime ?? '',
+    bedtime: src?.bedtime ?? fallback?.bedtime ?? usual.bedtime ?? '',
+    wakeTime: src?.wakeTime ?? fallback?.wakeTime ?? usual.wakeTime ?? '',
     steps: src?.steps != null ? String(src.steps) : '',
     activeMin: src?.activeMin != null ? String(src.activeMin) : '',
     mood: src?.mood ?? null,
@@ -81,7 +82,7 @@ export function CheckIn({ date: dateParam }: { date?: string }) {
     if (!days || !chosen) return;
     const log = days.find((x) => x.date === chosen)?.log ?? null;
     const latest = [...days].reverse().find((x) => x.log && x.date !== chosen)?.log ?? null;
-    const fresh = fromLog(log, latest, apps);
+    const fresh = fromLog(log, latest, apps, { bedtime: me!.bedtime, wakeTime: me!.wakeTime });
     setForm((prev) => {
       if (!prev || touched.current !== chosen) return fresh;
       const m = log?.measured;

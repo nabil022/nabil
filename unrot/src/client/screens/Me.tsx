@@ -10,7 +10,6 @@ import { AGE_GROUPS, type AgeGroup } from '../../shared/health';
 import { formatCents } from '../../shared/money';
 import { AVATARS, AVATAR_COLORS } from '../../shared/profile';
 import { STANDALONE, useApp, useQuery, type Theme } from '../lib/app';
-import { serverUrl } from '../lib/api';
 import { downloadText } from '../lib/download';
 import { IS_NATIVE } from '../lib/native';
 import { applyReminders, getReminders } from '../lib/reminders';
@@ -52,7 +51,9 @@ const MENU: { to: string; icon: IconName; title: string; sub: string }[] = [
 ];
 
 export function MeScreen() {
-  const { me } = useApp();
+  const { me, api } = useApp();
+  // On the phone alone there is nobody else to rank against.
+  const menu = api.mode === 'phone' ? MENU.filter((m) => m.to !== '/leaderboard') : MENU;
   const { go } = useRouter();
   if (!me) return null;
   return (
@@ -83,7 +84,7 @@ export function MeScreen() {
         </div>
       </Card>
       <div className="menu-grid">
-        {MENU.map((m) => (
+        {menu.map((m) => (
           <Link key={m.to} to={m.to} className="menu-item">
             <span className="feature-icon">
               <Icon name={m.icon} size={20} />
@@ -103,10 +104,11 @@ export function MeScreen() {
 // -- settings -----------------------------------------------------------------------------
 
 export function Settings() {
-  const { me, mutate, signOut, theme, setTheme, api, resetDemo, exitDemo, toast } = useApp();
+  const { me, mutate, signOut, theme, setTheme, api, resetLocal, exitDemo, toast } = useApp();
   const { go } = useRouter();
   const [name, setName] = useState(me?.name ?? '');
   const [deleting, setDeleting] = useState(false);
+  const [erasing, setErasing] = useState(false);
   const [password, setPassword] = useState('');
   const [exportText, setExportText] = useState<string | null>(null);
   if (!me) return null;
@@ -155,13 +157,34 @@ export function Settings() {
               </div>
             </Field>
             <div className="kv">
-              <span className="kv-k">Age group</span>
-              <span className="kv-v">{me.ageGroup}</span>
+              <span className="kv-k">Born</span>
+              <span className="kv-v">
+                {me.birthYear} · age group {me.ageGroup}
+              </span>
             </div>
             <div className="kv">
               <span className="kv-k">Time zone</span>
               <span className="kv-v">{me.timezone}</span>
             </div>
+          </div>
+        </Card>
+      </Section>
+
+      <Section title="Your routine">
+        <Card>
+          <div className="stack" style={{ gap: 14 }}>
+            <div className="grid-2">
+              <TimeSetting id="s-bed" label="Usual bedtime" value={me.bedtime} onSave={(v) => patch({ bedtime: v }, 'Bedtime saved')} />
+              <TimeSetting id="s-wake" label="Usual wake-up" value={me.wakeTime} onSave={(v) => patch({ wakeTime: v }, 'Wake-up saved')} />
+            </div>
+            <TimeSetting
+              id="s-study"
+              label="Homework usually starts"
+              value={me.studyStart}
+              required
+              onSave={(v) => v && patch({ studyStart: v }, 'Homework start saved')}
+              hint="Check-ins start from your usual times; the study planner from this one."
+            />
           </div>
         </Card>
       </Section>
@@ -216,13 +239,15 @@ export function Settings() {
       <Section title="Privacy and look">
         <Card>
           <div className="stack" style={{ gap: 14 }}>
-            <Toggle
-              id="s-public"
-              checked={me.publicProfile}
-              onChange={(v) => void patch({ publicProfile: v }, v ? 'You show on public boards' : 'Hidden from public boards')}
-              label="Show me on the public leaderboard"
-              detail="Your name, avatar and daily average. Groups always see you."
-            />
+            {api.mode !== 'phone' ? (
+              <Toggle
+                id="s-public"
+                checked={me.publicProfile}
+                onChange={(v) => void patch({ publicProfile: v }, v ? 'You show on public boards' : 'Hidden from public boards')}
+                label="Show me on the public leaderboard"
+                detail="Your name, avatar and daily average. Groups always see you."
+              />
+            ) : null}
             <Field label="Theme">
               <Segmented<Theme>
                 label="Theme"
@@ -251,9 +276,17 @@ export function Settings() {
                 <CopyButton text={exportText} label="Copy CSV" />
               </>
             ) : null}
+            {api.mode === 'phone' ? (
+              <>
+                <p className="small muted">Everything you enter is saved on this phone, and only here.</p>
+                <Button variant="quiet" icon="trash" onClick={() => setErasing(true)}>
+                  Erase everything on this phone
+                </Button>
+              </>
+            ) : null}
             {api.mode === 'demo' ? (
               <>
-                <Button variant="secondary" icon="refresh" onClick={() => resetDemo().then(() => toast('Demo reset', 'good'))}>
+                <Button variant="secondary" icon="refresh" onClick={() => resetLocal().then(() => toast('Demo reset', 'good'))}>
                   Reset the demo data
                 </Button>
                 {!STANDALONE ? (
@@ -275,14 +308,6 @@ export function Settings() {
                 <span className="kv-k">Email</span>
                 <span className="kv-v">{me.email}</span>
               </div>
-              {IS_NATIVE && serverUrl() ? (
-                <div className="kv">
-                  <span className="kv-k">Server</span>
-                  <span className="kv-v" style={{ overflowWrap: 'anywhere' }}>
-                    {serverUrl().replace(/^https?:\/\//, '')}
-                  </span>
-                </div>
-              ) : null}
               <Button variant="secondary" icon="logout" onClick={() => signOut().then(() => go('/', { replace: true }))}>
                 Log out
               </Button>
@@ -293,6 +318,19 @@ export function Settings() {
           </Card>
         </Section>
       ) : null}
+      <Confirm
+        open={erasing}
+        title="Erase everything?"
+        confirmLabel="Erase for good"
+        danger
+        onClose={() => setErasing(false)}
+        onConfirm={async () => {
+          await resetLocal();
+          go('/', { replace: true });
+        }}
+      >
+        <p>Your profile, check-ins, challenges, wallet and reminders are deleted from this phone. Unrot starts again from the setup. This cannot be undone.</p>
+      </Confirm>
       <Confirm
         open={deleting}
         title="Delete your account?"
@@ -313,6 +351,28 @@ export function Settings() {
         </Field>
       </Confirm>
     </Screen>
+  );
+}
+
+/**
+ * A time that saves as soon as it is picked (Android's time picker fires
+ * `change` once, on OK). Clearing it saves null unless it is `required`.
+ */
+function TimeSetting({ id, label, value, onSave, hint, required }: { id: string; label: string; value: string | null; onSave: (v: string | null) => unknown; hint?: string; required?: boolean }) {
+  return (
+    <Field label={label} htmlFor={id} hint={hint}>
+      <input
+        id={id}
+        className="input"
+        type="time"
+        defaultValue={value ?? ''}
+        onChange={(e) => {
+          const v = e.target.value || null;
+          if (v === value || (v === null && required)) return;
+          void onSave(v);
+        }}
+      />
+    </Field>
   );
 }
 

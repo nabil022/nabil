@@ -4,8 +4,8 @@
 
 An **Android app that measures your screen time by itself**, and the same app
 as an installable web app for iPhones. On Android, Unrot reads your app time
-from the phone (the data behind Digital Wellbeing); on iPhone you copy it from
-Screen Time each morning. Either way you add sleep, steps and a four-question
+from the phone (the data behind Digital Wellbeing) and keeps everything on the
+phone; on iPhone you copy it from Screen Time each morning. Either way you add sleep, steps and a four-question
 mood check. Friend groups compete every week and month for a pot; physical
 challenges take minutes off; deposits make you put money on your goal; a
 one-week Sleep Reset measures sleep and late-night screen use before and after
@@ -75,9 +75,12 @@ and invite links (`…/#/join/CODE`) open straight into the group.
 ## The Android app
 
 `android/` is the same app packaged for Android with [Capacitor](https://capacitorjs.com),
-plus one native plugin that reads Android's usage records. Nothing else changes:
-groups, pots, deposits, challenges, health and the Sleep Reset work exactly as
-on the web, and iPhone friends keep using the web app in the same groups.
+plus one native plugin that reads Android's usage records. It is your own app,
+not a demo: the first time it opens it sets up your profile, and everything
+is saved **on the phone**, with no account and no server. Tracking, check-ins,
+challenges, deposits, health, the study planner and the Sleep Reset all work on
+their own. **Groups need a server** that every friend's phone shares, which the
+Android app does not connect to yet, so its Groups tab says so.
 
 **Install it**
 
@@ -87,19 +90,25 @@ on the web, and iPhone friends keep using the web app in the same groups.
 2. Open the download. Android asks you once to allow installs from your
    browser, and may warn about installing an app from outside the Play Store:
    choose to install anyway.
-3. Open Unrot, enter your server's address (the one from *Put it online*), or
-   tap **Try the demo** to use it without a server.
-4. When the app asks, tap **Turn on tracking**, find Unrot in the list and
-   switch on **Usage access**.
+3. Open Unrot and set yourself up (about two minutes): first name, birth year
+   and an emoji; your usual bedtime, wake-up and homework start; the apps you
+   use; your normal week, measured from the phone; and your goals.
+4. When the app asks, find Unrot in the **Usage access** list and switch it on.
+
+Your profile and history live in the app's storage on the phone. **Settings ›
+Your data › Erase everything on this phone** starts over; uninstalling the app
+erases it too.
 
 Every push that touches `unrot/` runs that workflow: typecheck, all tests, the
 APK build, and an Android 14 emulator that installs the APK, grants Usage
-access, opens the demo and fails the run on a crash, a JavaScript error, or if
-the app can't read usage data.
+access, sets up a profile the way a person would, and fails the run on a crash,
+a JavaScript error, or if the home screen doesn't show screen time read from
+the phone.
 
 **Updates install over the old app only if every build is signed with the
 same key.** Without a key, CI signs each build with a one-off debug key and you
-uninstall before installing the next one. To set a key up once:
+uninstall before installing the next one, **which erases what the app saved**.
+To set a key up once:
 
 ```bash
 keytool -genkeypair -keystore unrot.keystore -alias unrot -keyalg RSA -keysize 2048 -validity 10000
@@ -131,14 +140,15 @@ and press Run, or `cd android && ./gradlew assembleDebug`.
   **today so far**. Open it at least once a day: days can only be saved for
   today and yesterday, the same rule as typed check-ins.
 - **Measured numbers can't be edited.** A check-in can add sleep, steps and mood
-  but not change the phone's minutes, and group leaderboards mark players whose
-  days were measured as *Auto-tracked*.
-- Onboarding can fill in *your normal* from last week's real usage.
+  but not change the phone's minutes. (The engine and server already mark
+  measured players as *Auto-tracked* on group boards, for when the Android app
+  joins groups on a server.)
+- Setup fills in *your normal* from last week's real usage, and the check-in
+  starts from your usual bedtime and wake-up.
 - Optional reminders (morning check-in, nightly cut-off) are scheduled on the
   phone in Settings.
-- **Privacy:** only each day's totals for the apps you track, and the minutes
-  after your cut-off, leave the phone. Which other apps you use, and the extra
-  apps you pick, stay on the phone.
+- **Privacy:** the Android app sends nothing anywhere. Usage records, your
+  profile and your check-ins stay on the phone.
 
 ## How it works
 
@@ -235,7 +245,7 @@ and warns you when something won't fit before it is due.
   apps' usage on any phone, so automatic tracking is the Android app's job.
   iPhone only exposes usage to apps with Apple's Family Controls entitlement,
   and even then not as plain numbers, so iPhone users copy it from Screen Time
-  (about 30 seconds a day). Mixed groups work: measured players are marked.
+  (about 30 seconds a day).
 - **Steps count above your usual, not from zero.** Taken literally, 15 minutes
   per 1,000 steps means an ordinary 8,000-step day erases 2 hours, and in
   testing every member of a group "cut" 50-70% without changing their
@@ -268,8 +278,9 @@ src/engine/    the whole backend as one function, handle(request) → response
   seed.ts      the demo world, replayed day by day through the real engine
 src/server/    node:http + node:sqlite persistence, scrypt passwords,
                rate limits, security headers, static hosting
-src/client/    React PWA; talks to the server, or in demo mode runs the same
-               engine in the browser with localStorage
+src/client/    React PWA; talks to the server, or runs the same engine on the
+               device with localStorage: the demo, and the Android app's
+               phone mode (lib/local.ts; first-run setup in screens/Setup.tsx)
   lib/native.ts, lib/tracking*.ts   the Android side: plugin, sync, reminders
 src/shared/usage.ts   Android usage events -> minutes per app per day
 android/       the Capacitor Android project and the UsageStats plugin

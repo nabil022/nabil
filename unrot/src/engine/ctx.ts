@@ -30,6 +30,11 @@ export interface EngineOptions {
   store: Store;
   crypto: EngineCrypto;
   now?: () => number;
+  /**
+   * The Android app's on-phone engine: allow the one profile on the phone to
+   * be made without email or password (POST /api/auth/local). Never on a server.
+   */
+  localProfiles?: boolean;
 }
 
 export interface PublicUser {
@@ -44,6 +49,7 @@ const FEED_KEEP = 200;
 export class Ctx {
   readonly store: Store;
   readonly crypto: EngineCrypto;
+  readonly localProfiles: boolean;
   now: () => number;
   /** In memory only: settlement runs at most every TICK_EVERY_MS unless forced. */
   lastTickAt = 0;
@@ -52,6 +58,7 @@ export class Ctx {
   constructor(opts: EngineOptions) {
     this.store = opts.store;
     this.crypto = opts.crypto;
+    this.localProfiles = opts.localProfiles ?? false;
     this.now = opts.now ?? (() => Date.now());
     addIndexes(this.store);
   }

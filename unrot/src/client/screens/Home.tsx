@@ -131,7 +131,7 @@ function PhoneCard() {
 }
 
 export function Home() {
-  const { me } = useApp();
+  const { me, api } = useApp();
   const { go } = useRouter();
   const q = useQuery<Dashboard>('/api/dashboard');
   const d = q.data;
@@ -241,7 +241,7 @@ export function Home() {
             ))}
           </div>
         </Section>
-      ) : (
+      ) : api.mode === 'phone' ? null : (
         <Card tone="brand" onClick={() => go('/groups')}>
           <div className="row">
             <Icon name="groups" size={26} />

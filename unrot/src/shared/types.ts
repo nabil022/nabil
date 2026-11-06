@@ -31,6 +31,9 @@ export interface UserDoc extends Doc {
   studyStart: string;
   studyBufferMin: number;
   studyMaxMin: number;
+  /** Usual bedtime and wake-up time on a school or work day (HH:MM), if given. */
+  bedtime?: string | null;
+  wakeTime?: string | null;
   xp: number;
   balanceCents: number;
   publicProfile: boolean;
