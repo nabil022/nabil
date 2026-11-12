@@ -40,7 +40,7 @@ import {
  */
 export function PhoneGroups() {
   return (
-    <Screen title="Groups">
+    <Screen title="Groups" back="/me">
       <Empty icon="groups" title="Groups need an online server">
         Groups put you and your friends on one leaderboard, with weekly and monthly winners and a pot. Every phone in the group has to share one online server for that, and Unrot doesn't have one yet.
       </Empty>

@@ -133,6 +133,25 @@ describe('check-ins', () => {
     expect(withSleep.streak).toBe(2);
   });
 
+  it('only pays for staying under the goal and keeping the cut-off once the day is over', () => {
+    const h = new Harness(`${MON}T08:00:00Z`);
+    const a = h.person('Ann', { baseline: { tiktok: 120, instagram: 60 } });
+    // 8 in the morning, nothing scrolled yet: a check-in, but no prize for a day that has barely begun.
+    expect(h.log(a.token, MON, {}, { lateNightMin: 0, mood: 4 }).xpGained).toBe(10);
+    // The day ends over the goal, and that is what counts.
+    h.at(`${MON}T22:00:00Z`);
+    expect(h.log(a.token, MON, { tiktok: 200 }, { lateNightMin: 0, mood: 4 }).xpGained).toBe(0);
+    // Next morning's check-in settles yesterday: over the goal, but the cut-off was kept (10).
+    h.at(`${addDays(MON, 1)}T08:00:00Z`);
+    expect(h.log(a.token, addDays(MON, 1), {}, { mood: 3 }).xpGained).toBe(10 + 10);
+    // A day that ends under the goal is paid when the next one is logged, once.
+    h.at(`${addDays(MON, 1)}T21:00:00Z`);
+    h.log(a.token, addDays(MON, 1), { tiktok: 40 }, { lateNightMin: 0 });
+    h.at(`${addDays(MON, 2)}T08:00:00Z`);
+    expect(h.log(a.token, addDays(MON, 2), {}, {}).xpGained).toBe(10 + 15 + 10);
+    expect(h.log(a.token, addDays(MON, 2), {}, {}).xpGained).toBe(0);
+  });
+
   it('takes 15 minutes off per 1,000 steps above your usual, up to half the day and 2 hours', () => {
     const h = new Harness(`${MON}T20:00:00Z`);
     const a = h.person('Ann', { baseline: { tiktok: 300 } });

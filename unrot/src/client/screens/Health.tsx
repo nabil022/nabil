@@ -53,8 +53,9 @@ export function Health() {
                 Healthier than {pct.overall}% of {ageLabel(h.ageGroup)} year-olds
               </div>
               <p className="tiny" style={{ marginTop: 4 }}>
-                Compared with {h.cohortSize} Unrot {h.cohortSize === 1 ? 'user' : 'users'} your age
-                {h.cohortSize < 25 ? ', topped up with published averages until more people join' : ''}.
+                {h.cohortSize === 0
+                  ? 'Compared with typical scores for your age, estimated from published averages.'
+                  : `Compared with ${h.cohortSize} Unrot ${h.cohortSize === 1 ? 'user' : 'users'} your age${h.cohortSize < 25 ? ', topped up with published averages until more people join' : ''}.`}
               </p>
             </div>
           </div>

@@ -11,7 +11,9 @@ import { useState } from 'react';
 import { RotMeter, WeekBars, type WeekPoint } from '../ui/charts';
 import { Icon } from '../ui/icons';
 import { Button, Card, ErrorNote, Loading, Meter, Pill, Screen, Section } from '../ui/kit';
+import { storage } from '../lib/storage';
 import { BackupNudge } from './Backup';
+import { SLEEP_ASKED_KEY } from './CheckIn';
 
 function greeting(nowMin: number): string {
   if (nowMin < 5 * 60) return 'Still up';
@@ -187,6 +189,15 @@ export function Home() {
           </div>
           <Icon name="next" />
         </Link>
+      ) : !d.checkin.yesterdaySleep && storage.get(SLEEP_ASKED_KEY) !== yesterday ? (
+        <Link to={`/checkin/${yesterday}`} className="banner banner-brand">
+          <Icon name="moon" size={26} />
+          <div className="grow">
+            <strong>How did you sleep?</strong>
+            <div className="muted small">Add last night's sleep to yesterday ({shortDate(yesterday)}): 10 seconds.</div>
+          </div>
+          <Icon name="next" />
+        </Link>
       ) : d.checkin.streak > 1 ? (
         <div className="row small muted" style={{ paddingLeft: 2 }}>
           <Icon name="flame" size={18} className="ink-brand" />
@@ -212,6 +223,14 @@ export function Home() {
         </div>
         <RotMeter value={s.days > 0 ? s.avgNet : 0} goal={d.dailyGoalMin} normal={d.baselineDailyMin} caption="a day, after bonuses" />
         <WeekBars days={days} normal={d.baselineDailyMin} today={d.today} />
+        {d.lastWeek ? (
+          <p className="small muted" style={{ marginTop: 10 }}>
+            Last week: <strong>{fmtMin(d.lastWeek.avgNet)}</strong> a day.
+            {s.loggedDays > 0 && Math.abs(Math.round(s.avgNet - d.lastWeek.avgNet)) >= 1
+              ? ` So far this week you're ${fmtMin(Math.abs(Math.round(s.avgNet - d.lastWeek.avgNet)))} a day ${s.avgNet < d.lastWeek.avgNet ? 'under' : 'over'} that.`
+              : ''}
+          </p>
+        ) : null}
       </Card>
 
       {d.groups.length ? (

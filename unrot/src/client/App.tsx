@@ -70,8 +70,18 @@ const TABS: { to: string; label: string; icon: IconName; match: (p: string) => b
   { to: '/me', label: 'You', icon: 'user', match: (p) => ['/me', '/settings', '/backup', '/wallet', '/deposit', '/stats', '/about', '/calculator'].some((x) => p.startsWith(x)) },
 ];
 
+/** On the phone alone there are no groups to show: that tab is your stats instead. */
+const PHONE_TABS: typeof TABS = [
+  TABS[0]!,
+  { to: '/stats', label: 'Stats', icon: 'chart', match: (p) => p.startsWith('/stats') },
+  TABS[2]!,
+  { ...TABS[3]!, match: (p) => !p.startsWith('/stats') && (TABS[3]!.match(p) || TABS[1]!.match(p)) },
+];
+
 function TabBar() {
   const { path } = useRouter();
+  const { api } = useApp();
+  const tabs = api.mode === 'phone' ? PHONE_TABS : TABS;
   const tab = (t: (typeof TABS)[number]) => (
     <Link key={t.to} to={t.to} className={cx('tab', t.match(path) && 'tab-on')}>
       <Icon name={t.icon} size={23} />
@@ -81,16 +91,16 @@ function TabBar() {
   return (
     <nav className="tabbar" aria-label="Main">
       <div className="tabbar-inner">
-        {tab(TABS[0]!)}
-        {tab(TABS[1]!)}
+        {tab(tabs[0]!)}
+        {tab(tabs[1]!)}
         <Link to="/checkin" className="tab-main-wrap" ariaLabel="Check in">
           <span className="tab-main">
             <Icon name="plus" size={28} />
           </span>
           <span>Check in</span>
         </Link>
-        {tab(TABS[2]!)}
-        {tab(TABS[3]!)}
+        {tab(tabs[2]!)}
+        {tab(tabs[3]!)}
       </div>
     </nav>
   );

@@ -144,6 +144,9 @@ await expectText(/Today so far, from your phone/, 'live today card');
 await expectText(/Finish yesterday/, 'finish-yesterday banner');
 await expectBelowStatusBar('home');
 if (await page.getByText('Challenge your friends').count()) errors.push('home still offers groups');
+// On the phone alone the second tab is Stats: there are no groups to show.
+const tabs = (await page.locator('nav.tabbar a').allInnerTexts()).map((t) => t.trim());
+if (!tabs.includes('Stats') || tabs.includes('Groups')) errors.push(`unexpected tabs: ${tabs.join(', ')}`);
 await shot('a04-home');
 
 // The check-in: measured minutes read-only, sleep times start from the routine.
@@ -158,6 +161,14 @@ await shot('a05-checkin');
 await page.getByRole('radio', { name: 'Mood: 4 of 5' }).click();
 await page.getByRole('button', { name: 'Save check-in' }).click();
 await expectText(/Saved|Check-in updated/, 'saved toast');
+
+// Today's check-in shows the phone's minutes so far, read-only, and leaves
+// tonight's sleep empty: it hasn't happened yet.
+await page.evaluate(() => (location.hash = '/checkin'));
+await expectText(/Today so far, from your phone/, 'live today note');
+const soFar = await page.getByText('So far', { exact: true }).count();
+if (soFar < 4) errors.push(`expected live rows on today's check-in, got ${soFar}`);
+await expectValue('#ci-bed', '', "no bedtime yet on today's check-in");
 
 // Groups explain they need a server; there is no public leaderboard either.
 await page.evaluate(() => (location.hash = '/groups'));

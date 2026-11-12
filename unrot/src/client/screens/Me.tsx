@@ -52,8 +52,11 @@ const MENU: { to: string; icon: IconName; title: string; sub: string }[] = [
 
 export function MeScreen() {
   const { me, api } = useApp();
-  // On the phone alone there is nobody else to rank against.
-  const menu = api.mode === 'phone' ? MENU.filter((m) => m.to !== '/leaderboard') : MENU;
+  // On the phone alone there is nobody else to rank against, and Stats has its own tab.
+  const menu: typeof MENU =
+    api.mode === 'phone'
+      ? [...MENU.filter((m) => m.to !== '/leaderboard' && m.to !== '/stats'), { to: '/groups', icon: 'groups', title: 'Groups', sub: 'Needs an online server' }]
+      : MENU;
   const { go } = useRouter();
   if (!me) return null;
   return (
@@ -518,7 +521,7 @@ function PhoneTracking() {
 }
 
 export function BaselineScreen({ then }: { then?: string }) {
-  const { me, mutate } = useApp();
+  const { me, mutate, api } = useApp();
   const { go } = useRouter();
   const [values, setValues] = useState<Record<string, number>>(() => ({ ...(me?.baseline?.perApp ?? {}) }));
   const [steps, setSteps] = useState(String(me?.baseline?.usualSteps ?? ''));
@@ -586,7 +589,7 @@ export function BaselineScreen({ then }: { then?: string }) {
           )}
         </Field>
       </Card>
-      <p className="tiny">Each value can be corrected for {BASELINE.EDIT_DAYS} days after you first enter it, then it locks, so nobody can raise their normal later to fake a bigger cut. Your groups can see it.</p>
+      <p className="tiny">Each value can be corrected for {BASELINE.EDIT_DAYS} days after you first enter it, then it locks, so {api.mode === 'phone' ? "you can't raise your normal later to fake a bigger cut." : 'nobody can raise their normal later to fake a bigger cut. Your groups can see it.'}</p>
       <Button
         size="lg"
         block
@@ -609,11 +612,11 @@ export function BaselineScreen({ then }: { then?: string }) {
 export function Stats() {
   const [days, setDays] = useState<'7' | '30' | '90'>('30');
   const [table, setTable] = useState(false);
-  const { me } = useApp();
+  const { me, api } = useApp();
   const q = useQuery<StatsView>(`/api/stats?days=${days}`);
   const s = q.data;
   return (
-    <Screen title="Stats" back="/me">
+    <Screen title="Stats" back={api.mode === 'phone' ? undefined : '/me'}>
       <Segmented
         label="Range"
         value={days}
@@ -723,7 +726,7 @@ export function Stats() {
 
           <Section title="Badges">
             <div className="badge-grid">
-              {s.achievements.map((a) => (
+              {s.achievements.filter((a) => api.mode !== 'phone' || a.id !== 'winner').map((a) => (
                 <div key={a.id} className={cx('badge', !a.earned && 'badge-off')}>
                   <span className="badge-icon">
                     <Icon name={a.earned ? 'trophy' : 'lock'} size={18} />
@@ -837,6 +840,8 @@ export function Leaderboard() {
 // -- about ---------------------------------------------------------------------------------
 
 export function About() {
+  const { api } = useApp();
+  const alone = api.mode === 'phone';
   return (
     <Screen title="How it works" back="/me">
       <Card>
@@ -846,10 +851,17 @@ export function About() {
             <span className="wordmark">Unrot</span>
           </div>
           <h3>Brain rot time</h3>
-          <p>
-            Each morning you log yesterday's minutes on the apps you track, copied from your phone's Screen Time or Digital Wellbeing page, plus sleep, steps and four quick mood
-            questions.
-          </p>
+          {alone ? (
+            <p>
+              Your phone measures the minutes you spend on the apps you track, the same numbers as Digital Wellbeing. Each morning yesterday is saved by itself, and you add
+              sleep, steps and four quick mood questions.
+            </p>
+          ) : (
+            <p>
+              Each morning you log yesterday's minutes on the apps you track, copied from your phone's Screen Time or Digital Wellbeing page, plus sleep, steps and four quick
+              mood questions.
+            </p>
+          )}
           <ul>
             <li>
               Every 1,000 steps <strong>above your usual</strong> takes <strong>{CREDIT.STEP_MINUTES_PER_1000} minutes</strong> off that day. Your usual walking is already
@@ -857,13 +869,14 @@ export function About() {
             </li>
             <li>
               Together they can cancel at most <strong>half</strong> of a day's brain rot, and never more than {fmtMin(CREDIT.DAILY_CAP_MIN)}. Otherwise a long walk would
-              erase a whole day of scrolling, and the person who walks most would always win.
+              erase a whole day of scrolling{alone ? '.' : ', and the person who walks most would always win.'}
             </li>
             <li>A day you don't log counts as your normal. Skipping the bad days doesn't help.</li>
-            <li>You can log today and yesterday. After that the day is final.</li>
+            <li>{alone ? 'Open Unrot at least once a day: a day can only be saved until the end of the next one. After that it is final.' : 'You can log today and yesterday. After that the day is final.'}</li>
+            <li>XP for staying under your goal and keeping your cut-off arrives once the day is over.</li>
           </ul>
-          <h3>Groups</h3>
-          <ul>
+          {alone ? null : <h3>Groups</h3>}
+          <ul hidden={alone}>
             <li>Rank by biggest % cut against each person's own normal, or by fewest hours a day.</li>
             <li>
               The level sets the target to win money:{' '}
@@ -878,7 +891,7 @@ export function About() {
           <h3>Deposits</h3>
           <p>
             Lock some money and promise to cut at least a number of hours against your normal over the next 7 or 30 days, starting tomorrow. Hit it and the money comes back.
-            Miss it and it goes into your group's pot for the winners.
+            {alone ? ' Miss it and the money is gone.' : " Miss it and it goes into your group's pot for the winners."}
           </p>
           <h3>Money</h3>
           <p>
@@ -887,7 +900,7 @@ export function About() {
           </p>
           <h3>Health %</h3>
           <p>
-            Physical and mental scores from your last 7 check-ins, against guidelines for your age, and a percentile against other users your age. A self-check, not a medical
+            Physical and mental scores from your last 7 check-ins, against guidelines for your age, and a percentile against {alone ? 'typical scores for your age' : 'other users your age'}. A self-check, not a medical
             assessment.
           </p>
         </div>

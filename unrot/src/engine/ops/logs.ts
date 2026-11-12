@@ -72,8 +72,19 @@ export function saveLog(ctx: Ctx, u: UserDoc, dateParam: string, body: Body): Sa
   };
   ctx.db.logs.put(doc);
 
-  const xp = ctx.awardXp(u.id, `checkin:${u.id}:${date}`, XP.checkin, 'Daily check-in') + awardForDay(ctx, u, doc);
+  const xp = ctx.awardXp(u.id, `checkin:${u.id}:${date}`, XP.checkin, 'Daily check-in') + awardForDay(ctx, u, doc) + awardFinishedDays(ctx, u, date);
   return { log: doc, xpGained: xp, streak: currentStreak(ctx, u), level: levelInfo(ctx.user(u.id).xp) };
+}
+
+/** Days still open when `date` is saved may have ended since: give them what they earned. */
+function awardFinishedDays(ctx: Ctx, u: UserDoc, date: ISODate): number {
+  let xp = 0;
+  for (let back = 1; back <= CHECKIN.EDIT_DAYS_BACK + 1; back++) {
+    const d = addDays(date, -back);
+    const log = ctx.log(u.id, d);
+    if (log) xp += awardForDay(ctx, u, log);
+  }
+  return xp;
 }
 
 function parseApps(input: unknown): Record<string, number> {
@@ -91,17 +102,23 @@ function checkTotal(apps: Record<string, number>): void {
   if (Object.values(apps).reduce((a, b) => a + b, 0) > 24 * 60) throw badRequest('That adds up to more than 24 hours. Check the minutes.');
 }
 
-/** XP that follows from what a day contains: under goal, cut-off kept, streaks. */
+/**
+ * XP that follows from what a day contains: under goal, cut-off kept, streaks.
+ * Staying under the goal and keeping the cut-off only count once the day is
+ * over: at 8 in the morning everyone is under their goal.
+ */
 function awardForDay(ctx: Ctx, u: UserDoc, doc: LogDoc): number {
   const date = doc.date;
   let xp = 0;
-  const raw = rawMinutes(doc, u.apps);
-  const net = raw - creditFor(raw, doc.steps, usualStepsOf(u.baseline), ctx.challengeMin(u.id, date));
-  if (u.dailyGoalMin > 0 && net <= u.dailyGoalMin) {
-    xp += ctx.awardXp(u.id, `goal:${u.id}:${date}`, XP.underGoal, 'Stayed under your daily goal');
-  }
-  if (doc.lateNightMin !== null && doc.lateNightMin <= CHECKIN.CUTOFF_KEPT_MAX_MIN) {
-    xp += ctx.awardXp(u.id, `cutoff:${u.id}:${date}`, XP.cutoffKept, 'Kept your cut-off');
+  if (date < ctx.today(u)) {
+    const raw = rawMinutes(doc, u.apps);
+    const net = raw - creditFor(raw, doc.steps, usualStepsOf(u.baseline), ctx.challengeMin(u.id, date));
+    if (u.dailyGoalMin > 0 && net <= u.dailyGoalMin) {
+      xp += ctx.awardXp(u.id, `goal:${u.id}:${date}`, XP.underGoal, 'Stayed under your daily goal');
+    }
+    if (doc.lateNightMin !== null && doc.lateNightMin <= CHECKIN.CUTOFF_KEPT_MAX_MIN) {
+      xp += ctx.awardXp(u.id, `cutoff:${u.id}:${date}`, XP.cutoffKept, 'Kept your cut-off');
+    }
   }
   const streak = streakEndingAt(ctx, u.id, date);
   if (streak > 0 && streak % 7 === 0) {
@@ -161,7 +178,7 @@ export function saveUsage(ctx: Ctx, u: UserDoc, dateParam: string, body: Body): 
     updatedAt: now,
   };
   ctx.db.logs.put(doc);
-  const xp = awardForDay(ctx, u, doc);
+  const xp = awardForDay(ctx, u, doc) + awardFinishedDays(ctx, u, date);
   return { log: doc, xpGained: xp, streak: currentStreak(ctx, u), level: levelInfo(ctx.user(u.id).xp) };
 }
 
@@ -215,10 +232,13 @@ export interface Dashboard {
    * `keepStreak`: the streak you would be on if you logged yesterday now.
    * `yesterdayAnswered`: the questions only you can answer (sleep, mood, steps) are in.
    * `yesterdayMeasured`: yesterday's screen time came from the phone.
+   * `yesterdaySleep`: last night's sleep is in.
    */
-  checkin: { today: boolean; yesterday: boolean; yesterdayAnswered: boolean; yesterdayMeasured: boolean; streak: number; keepStreak: number };
+  checkin: { today: boolean; yesterday: boolean; yesterdayAnswered: boolean; yesterdayMeasured: boolean; yesterdaySleep: boolean; streak: number; keepStreak: number };
   latest: DayView | null;
   week: { start: ISODate; end: ISODate; points: DayPoint[]; summary: Summary };
+  /** Last Monday-to-Sunday, to compare this week with; null if fewer than 3 of its days were logged. */
+  lastWeek: Summary | null;
   level: LevelInfo;
   health: HealthSnapshot;
   deposits: DepositView[];
@@ -239,6 +259,7 @@ export function dashboard(ctx: Ctx, u: UserDoc): Dashboard {
     if (ctx.log(u.id, d)) latest = dayView(ctx, u, d);
   }
   const completions = ctx.db.completions.by('user', u.id).filter((c) => c.weekStart === ws && c.kind === 'physical');
+  const lastWeek = summarize(ctx.series(u, datesBetween(addDays(ws, -7), addDays(ws, -1)), { apps: u.apps, baselineDaily: base }), base);
   return {
     today,
     nowMin: local.minutes,
@@ -250,11 +271,13 @@ export function dashboard(ctx: Ctx, u: UserDoc): Dashboard {
       yesterday: !!ctx.log(u.id, addDays(today, -1)),
       yesterdayAnswered: answered(ctx.log(u.id, addDays(today, -1))),
       yesterdayMeasured: (ctx.log(u.id, addDays(today, -1))?.measured?.apps.length ?? 0) > 0,
+      yesterdaySleep: (ctx.log(u.id, addDays(today, -1))?.sleepMin ?? null) !== null,
       streak: currentStreak(ctx, u),
       keepStreak: 1 + streakEndingAt(ctx, u.id, addDays(today, -2)),
     },
     latest,
     week: { start: ws, end: weekEnd(today), points, summary: summarize(points, base) },
+    lastWeek: lastWeek.loggedDays >= 3 ? lastWeek : null,
     level: levelInfo(u.xp),
     health: healthSnapshot(ctx, u),
     deposits: ctx.db.deposits

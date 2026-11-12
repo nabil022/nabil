@@ -25,7 +25,7 @@ const LEDGER_LABEL: Record<LedgerDoc['type'], string> = {
 };
 
 function DepositCard({ d }: { d: DepositView }) {
-  const { mutate } = useApp();
+  const { mutate, api } = useApp();
   const [cancel, setCancel] = useState(false);
   const status =
     d.status === 'kept' ? (
@@ -51,7 +51,7 @@ function DepositCard({ d }: { d: DepositView }) {
           </div>
           <div className="card-sub">
             {shortDate(d.start)} to {shortDate(d.end)}
-            {d.groupName ? ` · if missed, goes to ${d.groupName}` : ' · if missed, goes to the community jar'}
+            {d.groupName ? ` · if missed, goes to ${d.groupName}` : api.mode === 'phone' ? ' · if missed, you lose it' : ' · if missed, goes to the community jar'}
           </div>
         </div>
         {status}
@@ -121,6 +121,8 @@ function MoneySheet({ kind, open, onClose, balance }: { kind: 'topup' | 'withdra
 }
 
 export function Wallet() {
+  const { api } = useApp();
+  const alone = api.mode === 'phone';
   const { go } = useRouter();
   const q = useQuery<WalletView>('/api/wallet');
   const [sheet, setSheet] = useState<'topup' | 'withdraw' | null>(null);
@@ -177,7 +179,7 @@ export function Wallet() {
               <Icon name="lock" size={26} className="ink-brand" />
               <div className="grow">
                 <div className="card-title">Put money on your goal</div>
-                <div className="card-sub">Lock a deposit, cut the hours you promise, get it back. Miss it and it goes to your group's pot.</div>
+                <div className="card-sub">Lock a deposit, cut the hours you promise, get it back. {alone ? 'Miss it and the money is gone.' : "Miss it and it goes to your group's pot."}</div>
               </div>
               <Icon name="next" />
             </div>
@@ -207,7 +209,7 @@ export function Wallet() {
             ))}
           </div>
         </Card>
-        {w.communityJarCents > 0 ? <p className="tiny">Community jar (deposits lost without a group): {formatCents(w.communityJarCents)}</p> : null}
+        {!alone && w.communityJarCents > 0 ? <p className="tiny">Community jar (deposits lost without a group): {formatCents(w.communityJarCents)}</p> : null}
       </Section>
 
       <MoneySheet kind="topup" open={sheet === 'topup'} onClose={() => setSheet(null)} balance={w.balanceCents} />
@@ -217,7 +219,8 @@ export function Wallet() {
 }
 
 export function DepositNew() {
-  const { me, mutate } = useApp();
+  const { me, mutate, api } = useApp();
+  const alone = api.mode === 'phone';
   const { go } = useRouter();
   const groups = useQuery<GroupSummary[]>('/api/groups');
   const [amount, setAmount] = useState(1000);
@@ -242,6 +245,7 @@ export function DepositNew() {
   const end = addDays(start, days - 1);
   const dest = groupId === undefined ? (groups.data?.[0]?.id ?? null) : groupId;
   const destName = dest ? (groups.data?.find((g) => g.id === dest)?.name ?? 'your group') : 'the community jar';
+  const ifMissed = alone ? `you lose the ${formatCents(amount)}` : `${formatCents(amount)} goes to ${destName}`;
   const amounts = [200, 500, 1000, 2000].filter((a) => a <= Math.max(u.balanceCents, MONEY.MIN_DEPOSIT_CENTS));
 
   return (
@@ -278,18 +282,22 @@ export function DepositNew() {
           <p className="small">
             That means averaging <strong>{fmtMin(target)} a day</strong> or less, after step and challenge bonuses. Days you don't log count as your normal.
           </p>
-          <Field label="If you miss it, the money goes to">
-            <div className="wrap">
-              {(groups.data ?? []).map((g) => (
-                <Chip key={g.id} selected={dest === g.id} onClick={() => setGroupId(g.id)}>
-                  {g.emoji} {g.name}
+          {alone ? (
+            <p className="small muted">If you miss it, the money is gone.</p>
+          ) : (
+            <Field label="If you miss it, the money goes to">
+              <div className="wrap">
+                {(groups.data ?? []).map((g) => (
+                  <Chip key={g.id} selected={dest === g.id} onClick={() => setGroupId(g.id)}>
+                    {g.emoji} {g.name}
+                  </Chip>
+                ))}
+                <Chip selected={dest === null} onClick={() => setGroupId(null)}>
+                  Community jar
                 </Chip>
-              ))}
-              <Chip selected={dest === null} onClick={() => setGroupId(null)}>
-                Community jar
-              </Chip>
-            </div>
-          </Field>
+              </div>
+            </Field>
+          )}
         </div>
       </Card>
       <Card tone="night">
@@ -318,7 +326,7 @@ export function DepositNew() {
         }}
       >
         <p>
-          Cut at least <strong>{fmtMin(cut)}</strong> between {shortDate(start)} and {shortDate(end)}. If you miss, {formatCents(amount)} goes to {destName}. You can cancel until it starts tomorrow.
+          Cut at least <strong>{fmtMin(cut)}</strong> between {shortDate(start)} and {shortDate(end)}. If you miss, {ifMissed}. You can cancel until it starts tomorrow.
         </p>
       </Confirm>
     </Screen>

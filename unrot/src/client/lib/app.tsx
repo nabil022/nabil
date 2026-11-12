@@ -54,6 +54,14 @@ async function makeApi(mode: Mode): Promise<Api> {
   return localApi(mode);
 }
 
+function deviceTimeZone(): string | null {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || null;
+  } catch {
+    return null;
+  }
+}
+
 function applyTheme(t: Theme): void {
   const root = document.documentElement;
   if (t === 'system') root.removeAttribute('data-theme');
@@ -81,7 +89,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
       return;
     }
     try {
-      setMe(await a.call<Me>('GET', '/api/me'));
+      let m = await a.call<Me>('GET', '/api/me');
+      // The Android app's days follow the phone's own clock: if the phone has
+      // moved to another time zone since setup, so does the profile.
+      if (a.mode === 'phone') {
+        const tz = deviceTimeZone();
+        if (tz && tz !== m.timezone) m = await a.call<Me>('PATCH', '/api/me', { timezone: tz }).catch(() => m);
+      }
+      setMe(m);
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
         a.setToken(null);

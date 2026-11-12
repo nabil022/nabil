@@ -39,7 +39,7 @@ welcome page also has **Try the demo**, which runs the whole app inside your
 browser with no account.
 
 ```bash
-npm test             # rules, usage maths, settlement, deposits, phone profiles, backups, server + SQLite (44 tests)
+npm test             # rules, usage maths, settlement, deposits, phone profiles, backups, server + SQLite (45 tests)
 npm run typecheck    # four strict TypeScript projects
 npm run build        # dist/client (the PWA) + dist/server.mjs
 npm start            # production server on :3000, data in ./data/unrot.db
@@ -139,6 +139,9 @@ and press Run, or `cd android && ./gradlew assembleDebug`.
   (finished days only, so live leaderboards never see half a day) and shows
   **today so far**. Open it at least once a day: days can only be saved for
   today and yesterday, the same rule as typed check-ins.
+- The check-in's **Today** tab shows the phone's minutes so far, read-only.
+  XP for staying under the goal and keeping the cut-off is paid once the day is
+  over (for everyone, web included), so an early check-in can't earn it.
 - **Measured numbers can't be edited.** A check-in can add sleep, steps and mood
   but not change the phone's minutes. (The engine and server already mark
   measured players as *Auto-tracked* on group boards, for when the Android app

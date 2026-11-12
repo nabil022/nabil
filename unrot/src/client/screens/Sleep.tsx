@@ -9,6 +9,7 @@ import { addDays, datesBetween, dayName, formatHM, parseHM, shortDate } from '..
 import { fmtHours, fmtMin } from '../../shared/format';
 import type { SleepMetrics } from '../../shared/sleep';
 import { useApp, useQuery } from '../lib/app';
+import { IS_NATIVE } from '../lib/native';
 import { useRouter } from '../lib/router';
 import { Timeline } from '../ui/charts';
 import { Icon } from '../ui/icons';
@@ -153,12 +154,20 @@ export function SleepReset() {
           <Section title="Make the cut-off stick">
             <Card>
               <div className="prose">
-                <p>
-                  <strong>iPhone:</strong> Settings › Screen Time › Downtime › Scheduled, from {cur.cutoff}.
-                </p>
-                <p>
-                  <strong>Android:</strong> Settings › Digital Wellbeing › Bedtime mode, from {cur.cutoff}.
-                </p>
+                {IS_NATIVE ? (
+                  <p>
+                    Turn on <strong>Bedtime mode</strong> from {cur.cutoff}: Settings › Digital Wellbeing › Bedtime mode.
+                  </p>
+                ) : (
+                  <>
+                    <p>
+                      <strong>iPhone:</strong> Settings › Screen Time › Downtime › Scheduled, from {cur.cutoff}.
+                    </p>
+                    <p>
+                      <strong>Android:</strong> Settings › Digital Wellbeing › Bedtime mode, from {cur.cutoff}.
+                    </p>
+                  </>
+                )}
                 <p>Charge the phone outside your room and use a separate alarm.</p>
               </div>
             </Card>

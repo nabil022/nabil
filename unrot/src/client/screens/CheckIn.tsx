@@ -9,11 +9,15 @@ import { sleepMinutes } from '../../shared/sleep';
 import type { LogDoc } from '../../shared/types';
 import { useApp, useQuery } from '../lib/app';
 import { IS_NATIVE } from '../lib/native';
+import { storage } from '../lib/storage';
 import { useRouter } from '../lib/router';
 import { useTracking } from '../lib/tracking-context';
 import { Button, Card, Chip, ErrorNote, Field, Likert, Loading, MinutesInput, Pill, Screen, Section, Segmented } from '../ui/kit';
 
 const LATE_OPTIONS = [0, 15, 30, 60, 90, 120];
+
+/** The last "yesterday" whose check-in was saved the morning after (see Home's sleep prompt). */
+export const SLEEP_ASKED_KEY = 'unrot.sleepAsked';
 
 interface Form {
   apps: Record<string, number>;
@@ -48,7 +52,7 @@ function fromLog(log: LogDoc | null, fallback: LogDoc | null, apps: string[], us
 }
 
 export function CheckIn({ date: dateParam }: { date?: string }) {
-  const { me, mutate, toast } = useApp();
+  const { me, api, mutate, toast } = useApp();
   const { go } = useRouter();
   const today = me!.today;
   const yesterday = addDays(today, -1);
@@ -82,7 +86,9 @@ export function CheckIn({ date: dateParam }: { date?: string }) {
     if (!days || !chosen) return;
     const log = days.find((x) => x.date === chosen)?.log ?? null;
     const latest = [...days].reverse().find((x) => x.log && x.date !== chosen)?.log ?? null;
-    const fresh = fromLog(log, latest, apps, { bedtime: me!.bedtime, wakeTime: me!.wakeTime });
+    // Tonight hasn't happened yet: today's sleep stays empty until tomorrow morning.
+    const tonight = chosen === today;
+    const fresh = fromLog(log, tonight ? null : latest, apps, tonight ? { bedtime: null, wakeTime: null } : { bedtime: me!.bedtime, wakeTime: me!.wakeTime });
     setForm((prev) => {
       if (!prev || touched.current !== chosen) return fresh;
       const m = log?.measured;
@@ -104,7 +110,12 @@ export function CheckIn({ date: dateParam }: { date?: string }) {
     setForm({ ...form, [k]: v });
   };
   const isMeasured = (app: string) => !!measured?.apps.includes(app);
-  const raw = Object.values(form.apps).reduce((a, b) => a + b, 0);
+  // Android, today: the phone already knows the minutes so far. They show
+  // read-only, and tomorrow morning the finished day replaces them.
+  const live = IS_NATIVE && tracking.granted && chosen === today && !measured && tracking.today?.date === today ? tracking.today : null;
+  const isLive = (app: string) => !!live?.measuredApps.includes(app);
+  const appsNow = live ? { ...form.apps, ...Object.fromEntries(live.measuredApps.map((a) => [a, live.apps[a] ?? 0])) } : form.apps;
+  const raw = Object.values(appsNow).reduce((a, b) => a + b, 0);
   const steps = form.steps === '' ? null : Number(form.steps);
   const challengeMin = days.find((x) => x.date === chosen)?.challengeCredit ?? 0;
   const usual = me!.baseline?.usualSteps ?? usualStepsOf(null);
@@ -115,7 +126,7 @@ export function CheckIn({ date: dateParam }: { date?: string }) {
   const save = async () => {
     setBusy(true);
     const out = await mutate<SaveLogResult>('PUT', `/api/logs/${chosen}`, {
-      apps: form.apps,
+      apps: appsNow,
       lateNightMin: form.lateNightMin,
       bedtime: form.bedtime || null,
       wakeTime: form.wakeTime || null,
@@ -129,6 +140,8 @@ export function CheckIn({ date: dateParam }: { date?: string }) {
     }, undefined);
     setBusy(false);
     if (out) {
+      // Home stops asking about last night once yesterday has been looked at today.
+      if (chosen === yesterday) storage.set(SLEEP_ASKED_KEY, yesterday);
       toast(out.xpGained > 0 ? `Saved. +${out.xpGained} XP` : 'Check-in updated', 'good');
       go('/', { replace: true });
     }
@@ -150,10 +163,16 @@ export function CheckIn({ date: dateParam }: { date?: string }) {
         <Card>
           <p className="tiny" style={{ marginBottom: 6 }}>
             {measured
-              ? 'Measured by your phone. Measured apps can\'t be edited, so every number on the leaderboard is real.'
-              : IS_NATIVE && tracking.granted && chosen === today
-                ? 'Today is measured automatically and saved tomorrow morning, once the day is over.'
-                : `Copy each app's time from Screen Time (iPhone) or Digital Wellbeing (Android) for ${chosen === today ? 'today so far' : 'yesterday'}.`}
+              ? api.mode === 'phone'
+                ? "Measured by your phone, so these can't be edited."
+                : "Measured by your phone. Measured apps can't be edited, so every number on the leaderboard is real."
+              : live
+                ? 'Today so far, from your phone. The finished day is saved tomorrow morning.'
+                : IS_NATIVE && tracking.granted && chosen === today
+                  ? 'Reading today so far from your phone.'
+                  : IS_NATIVE
+                    ? `Turn on tracking on the Home screen and these fill in by themselves. Until then, copy each app's time from Settings › Digital Wellbeing for ${chosen === today ? 'today so far' : 'yesterday'}.`
+                    : `Copy each app's time from Screen Time (iPhone) or Digital Wellbeing (Android) for ${chosen === today ? 'today so far' : 'yesterday'}.`}
           </p>
           {apps.map((id) => (
             <div className="app-row" key={id}>
@@ -162,12 +181,12 @@ export function CheckIn({ date: dateParam }: { date?: string }) {
                 <span>{appName(id)}</span>
                 {base[id] !== undefined ? <span className="tiny">normal {fmtMin(base[id]!)}</span> : null}
               </span>
-              {isMeasured(id) ? (
+              {isMeasured(id) || isLive(id) ? (
                 <span className="measured-value">
                   <Pill tone="fresh" icon="phone">
-                    From phone
+                    {isLive(id) ? 'So far' : 'From phone'}
                   </Pill>
-                  <strong className="tabular">{fmtMin(form.apps[id] ?? 0)}</strong>
+                  <strong className="tabular">{fmtMin(appsNow[id] ?? 0)}</strong>
                 </span>
               ) : (
                 <MinutesInput id={`ci-${id}`} label={appName(id)} value={form.apps[id] ?? 0} onChange={(m) => set('apps', { ...form.apps, [id]: m })} />
@@ -205,7 +224,11 @@ export function CheckIn({ date: dateParam }: { date?: string }) {
                 <input id="ci-wake" className="input" type="time" value={form.wakeTime} onChange={(e) => set('wakeTime', e.target.value)} />
               </Field>
             </div>
-            {sleep !== null ? <p className="small muted">That's {fmtMin(sleep)} of sleep.</p> : null}
+            {sleep !== null ? (
+              <p className="small muted">That's {fmtMin(sleep)} of sleep.</p>
+            ) : chosen === today ? (
+              <p className="small muted">Tonight hasn't happened yet. Add your sleep tomorrow morning.</p>
+            ) : null}
             {measured?.lateNight ? (
               <div className="kv">
                 <span className="kv-k">Phone time after your {me!.cutoff} cut-off</span>

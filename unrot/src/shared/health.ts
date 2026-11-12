@@ -347,7 +347,8 @@ export function percentile(score: number, cohort: readonly number[], reference: 
     below += refWeight * (lo + (hi - lo) / 2);
     total += refWeight * reference.length;
   }
-  return total > 0 ? Math.round((below / total) * 100) : 50;
+  // "Healthier than 100% of people" can't be true of anyone: keep it to 1-99.
+  return total > 0 ? Math.min(99, Math.max(1, Math.round((below / total) * 100))) : 50;
 }
 
 /** Ten bins (0-9, 10-19, …, 90-100), as fractions of the comparison population. */
